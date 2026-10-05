@@ -178,4 +178,37 @@ assert len(b.sent) == 1 and "не отмечено 2 дела" in b.sent[0][1]
 asyncio.run(press(evening_action, "ev:mv:2030-03-05", 9))
 assert sorted(s for (s,) in db.execute("SELECT start FROM tasks WHERE title IN ('Купить хлеб', 'Позвонить маме')")) == [
     "2030-03-06", "2030-03-06T18:00"]
+
+# ── /task в группе: ответом на сообщение; задача только автору команды ──
+import bot as bot_module  # noqa: E402
+
+
+class GroupMsg:
+    def __init__(self, uid, reply_to=None):
+        self.from_user, self.reply_to_message = NS(id=uid), reply_to
+        self.chat = NS(id=-500, title="Работа")
+        self.replies, self.reactions = [], []
+        self.bot = Bot2()
+        async def get_me(): return NS(username="tracker_bot")
+        self.bot.get_me = get_me
+
+    async def reply(self, text, **kw): self.replies.append(text)
+    async def react(self, r): self.reactions.append(r)
+
+
+async def fake_analyze(m, mode, ctx):
+    return bot_module.Result(reply="", update=[], create=[NewTask(
+        title="Созвон", start="2030-04-01T15:00", location="", description="", reminders=[], repeat="")])
+real_analyze, bot_module.analyze = bot_module.analyze, fake_analyze
+voice = NS(as_=lambda b: voice)
+m = GroupMsg(9)
+asyncio.run(bot_module.group_task(m))
+assert "Ответь командой /task" in m.replies[0]  # без ответа на сообщение
+m = GroupMsg(12345, voice)
+asyncio.run(bot_module.group_task(m))
+assert "Старт" in m.replies[0]  # не запускал бота — в личку не написать
+m = GroupMsg(9, voice)
+asyncio.run(bot_module.group_task(m))
+assert m.reactions and not m.replies and m.bot.sent[0][0] == 9  # карточка в личку автору, в чате только 👍
+bot_module.analyze = real_analyze
 print("ok")

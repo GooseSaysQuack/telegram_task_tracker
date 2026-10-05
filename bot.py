@@ -16,14 +16,17 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.exceptions import TelegramAPIError
-from aiogram.filters import Command
+from aiogram.filters import JOIN_TRANSITION, ChatMemberUpdatedFilter, Command
 from aiogram.types import (
     BotCommand,
+    BotCommandScopeAllGroupChats,
     CallbackQuery,
+    ChatMemberUpdated,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     MenuButtonWebApp,
     Message,
+    ReactionTypeEmoji,
     WebAppInfo,
 )
 from aiogram.utils.web_app import safe_parse_webapp_init_data
@@ -40,8 +43,10 @@ if Path(".env").exists():
 
 TZ = ZoneInfo(os.getenv("TIMEZONE", "Asia/Bishkek"))
 # Бесплатный лимит Gemini считается отдельно на каждую модель — при 429/503 пробуем следующую.
-MODELS = [os.getenv("GEMINI_MODEL", "gemini-flash-latest"),
-          *filter(None, os.getenv("GEMINI_FALLBACKS", "gemini-flash-lite-latest,gemini-2.5-flash").split(","))]
+# Основная — самая быстрая из проверенных (~1–2 с на ответ); более тяжёлые «думают» 10–25 с.
+MODELS = [os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+          *filter(None, os.getenv("GEMINI_FALLBACKS", "gemini-3.1-flash-lite,gemini-flash-latest").split(","))]
+LLM_TIMEOUT_MS = 20_000  # зависшая модель не должна держать ответ — переходим к следующей
 PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")  # HTTPS-адрес сервера (туннель или хостинг)
 PORT = int(os.getenv("PORT", "8080"))
 ALL_DAY_HOUR = 9  # от этого часа считаются напоминания для задач «на весь день»
@@ -61,6 +66,22 @@ COMMANDS = [
     BotCommand(command="calendar", description="Показывать задачи в календаре телефона"),
     BotCommand(command="help", description="Что умеет бот"),
 ]
+GROUP_COMMANDS = [
+    BotCommand(command="task", description="Ответом на сообщение, голосовое или фото — сделать задачу"),
+    BotCommand(command="help", description="Как я работаю в чате"),
+]
+GROUP = F.chat.type.in_({"group", "supergroup"})
+
+# Тексты профиля бота: выставляются при запуске, в BotFather вводить не нужно.
+SHORT_DESCRIPTION = "Собираю дела из чатов, голосовых и скриншотов в календарь и напоминаю вовремя. ИИ-ассистент в Telegram."
+DESCRIPTION = (
+    "Забываешь договорённости в куче чатов? Я помогу.\n\n"
+    "📨 Перешли сообщение, надиктуй голосовое или пришли скриншот — найду встречи, дедлайны и дела\n"
+    "🗓 Сложу всё в календарь: прямо в Telegram и в календаре телефона\n"
+    "⏰ Напомню, когда нужно, а утром пришлю план на день\n"
+    "💬 Спроси: «что у меня завтра?» или «перенеси встречу на субботу»\n\n"
+    "Нажми «Старт» 👇"
+)
 
 # Дешёвый фильтр для групп: в LLM идут только сообщения с намёком на дату или дело.
 HINT = re.compile(
@@ -172,7 +193,7 @@ class Result(BaseModel):
 
 @cache
 def llm() -> genai.Client:
-    return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    return genai.Client(api_key=os.environ["GEMINI_API_KEY"], http_options={"timeout": LLM_TIMEOUT_MS})
 
 
 # ── Даты и подписи ───────────────────────────────────────────────
@@ -522,9 +543,11 @@ async def analyze(m: Message, mode: str, tasks: str) -> Result | None:
                     )
                     return resp.parsed
                 except errors.APIError as e:
-                    if e.code not in (429, 500, 503):  # лимит или перегрузка — пробуем дальше, остальное — ошибка
+                    if e.code not in (404, 429, 500, 503):  # нет модели, лимит или перегрузка — пробуем дальше
                         raise
                     logging.warning("gemini %s: %s", model, e.code)
+                except TimeoutError:
+                    logging.warning("gemini %s: timeout", model)
             await asyncio.sleep(5)
     except Exception as e:  # сеть, неверный ключ
         logging.warning("gemini: %s", e)
@@ -607,8 +630,9 @@ async def propose_change(bot: Bot, uid: int, task_id: int, data: dict) -> bool:
 @dp.message(Command("start", "help"), F.chat.type == "private")
 async def start(m: Message):
     register(m.from_user.id)
+    name = escape(m.from_user.first_name or "")
     await m.answer(
-        "<b>Привет! Я собираю твои дела из чатов.</b>\n\n"
+        f"<b>Привет{', ' + name if name else ''}! Я собираю твои дела из чатов.</b>\n\n"
         "📨 Пересылай мне сообщения про встречи и дела\n"
         "🎙 Надиктуй голосовое: «завтра в 10 стоматолог»\n"
         "📸 Пришли скриншот переписки, афишу или билет\n"
@@ -711,7 +735,75 @@ async def private(m: Message):
         await m.reply("Не нашёл тут дел. Можно спросить: «что у меня завтра?» или «перенеси встречу на субботу».")
 
 
-@dp.message(F.chat.type.in_({"group", "supergroup"}), F.text | F.caption)
+def start_button(bot_username: str) -> list[InlineKeyboardButton]:
+    return [InlineKeyboardButton(text="🚀 Получать задачи в личку", url=f"https://t.me/{bot_username}?start=group")]
+
+
+@dp.message(Command("start", "help"), GROUP)
+async def group_help(m: Message):
+    me = await m.bot.get_me()
+    await m.reply(
+        "Я замечаю в этом чате встречи, дедлайны и переносы и присылаю их в личку тем, кто запустил меня. "
+        "В чат я ничего не пишу.\n\n"
+        "🎙 Голосовые и фото сам не разбираю. Ответь на такое сообщение командой /task — "
+        "и я пришлю задачу тебе в личку. Так же можно с любым сообщением, которое я пропустил.",
+        reply_markup=keyboard(start_button(me.username)),
+    )
+
+
+@dp.message(Command("today", "tasks", "settings", "calendar"), GROUP)
+async def group_private_only(m: Message):
+    me = await m.bot.get_me()
+    await m.reply("Эта команда работает в личке — там твои задачи не видны другим.",
+                  reply_markup=keyboard(start_button(me.username)))
+
+
+@dp.message(Command("task"), GROUP)
+async def group_task(m: Message):
+    """/task ответом на сообщение: явная просьба разобрать его (в т.ч. голосовое или фото). Задача — только автору команды."""
+    me = await m.bot.get_me()
+    uid = m.from_user.id
+    if not (target := m.reply_to_message):
+        await m.reply("Ответь командой /task на сообщение, голосовое или фото — и я сделаю из него задачу.")
+        return
+    if not db.execute("SELECT 1 FROM users WHERE id = ?", (uid,)).fetchone():
+        await m.reply("Сначала нажми «Старт» у меня в личке — туда придёт задача.",
+                      reply_markup=keyboard(start_button(me.username)))
+        return
+    mode = f"Пользователь попросил сделать задачу из сообщения в групповом чате «{m.chat.title or ''}»."
+    if (res := await analyze(target.as_(m.bot), mode, user_context(uid))) is None:
+        await m.reply("Не получилось разобрать, попробуй позже.")
+        return
+    acted = 0
+    for t in res.create:
+        acted += await create_pending(m.bot, uid, t, m.chat.title or "", m.chat.id)
+    for c in res.update:
+        acted += await propose_change(m.bot, uid, c.id, change_data(c))
+    if acted:
+        await m.react([ReactionTypeEmoji(emoji="👍")])  # тихо: карточка уже в личке
+    else:
+        await m.reply("Не нашёл тут дела.")
+
+
+@dp.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=JOIN_TRANSITION), GROUP)
+async def added_to_group(event: ChatMemberUpdated):
+    """Бота добавили в группу: объясняем, как он работает, и предупреждаем, если он не видит сообщений."""
+    me = await event.bot.get_me()
+    text = (
+        "👋 Привет! Я замечаю в этом чате встречи, дедлайны и переносы и присылаю их в личку — "
+        "тем, кто запустил меня. Здесь я молчу и ничего не пишу.\n\n"
+        "Чтобы получать задачи из этого чата — нажмите кнопку ниже и «Старт»."
+    )
+    if not me.can_read_all_group_messages and event.new_chat_member.status != "administrator":
+        text += (
+            "\n\n⚠️ Сейчас я не вижу сообщений чата. Сделайте меня администратором "
+            "или отключите режим приватности в @BotFather (/setprivacy → Disable) и добавьте меня заново."
+        )
+    await event.answer(text + "\n\n🎙 Голосовое или фото — ответьте на него командой /task.",
+                       reply_markup=keyboard(start_button(me.username)))
+
+
+@dp.message(GROUP, F.text | F.caption)
 async def group(m: Message):
     if not HINT.search(m.text or m.caption):
         return
@@ -1135,6 +1227,9 @@ async def main():
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
     await bot.set_my_commands(COMMANDS)
+    await bot.set_my_commands(GROUP_COMMANDS, scope=BotCommandScopeAllGroupChats())
+    await bot.set_my_description(DESCRIPTION)
+    await bot.set_my_short_description(SHORT_DESCRIPTION)
     if PUBLIC_URL:
         await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="Календарь", web_app=WebAppInfo(url=PUBLIC_URL)))
     reminders = asyncio.create_task(scheduler(bot))  # noqa: F841 — держим ссылку, чтобы задачу не собрал GC

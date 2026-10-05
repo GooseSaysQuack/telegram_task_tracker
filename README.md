@@ -189,6 +189,8 @@ INFO:aiogram.dispatcher:Run polling for bot @your_bot ...
 - **Надиктовать** голосовое или **прислать скриншот/фото**.
 - **Написать с повтором**: «каждый вторник в 10 планёрка».
 - **Добавить бота в группу** — он сам найдёт дела в сообщениях вроде «встреча завтра в 11».
+  Голосовые и фото в группе он сам не слушает (это дорого и неприятно для участников): ответь на такое сообщение
+  командой `/task` — задача придёт тебе в личку. В группе работают `/task` и `/help`.
 
 Бот пришлёт карточку → нажми **✅ Добавить**. Новые задачи также видны в Mini App в блоке «Нужно подтвердить».
 
@@ -256,8 +258,8 @@ INFO:aiogram.dispatcher:Run polling for bot @your_bot ...
 | `GEMINI_API_KEY` | ✅ | — | Ключ из Google AI Studio |
 | `PUBLIC_URL` | для Mini App | — | Публичный HTTPS-адрес (туннель или сервер). Без него бот работает, но без Mini App и подписки |
 | `TIMEZONE` | | `Asia/Bishkek` | Часовой пояс для дат и напоминаний ([список](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)) |
-| `GEMINI_MODEL` | | `gemini-flash-latest` | Основная модель Gemini |
-| `GEMINI_FALLBACKS` | | `gemini-flash-lite-latest,gemini-2.5-flash` | Запасные модели при лимите или перегрузке |
+| `GEMINI_MODEL` | | `gemini-3.5-flash-lite` | Основная модель Gemini — самая быстрая из проверенных (~1–2 с на ответ) |
+| `GEMINI_FALLBACKS` | | `gemini-3.1-flash-lite,gemini-flash-latest` | Запасные модели при лимите, перегрузке или тайм-ауте (20 с) |
 | `PORT` | | `8080` | Порт веб-сервера |
 | `DB_PATH` | | `tasks.db` | Файл базы SQLite |
 
