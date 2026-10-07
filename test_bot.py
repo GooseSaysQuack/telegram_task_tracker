@@ -282,4 +282,13 @@ assert any(uid == 10 and "не отмечено 2 дела" in text for uid, tex
 asyncio.run(press(bot.evening_action, "ev:mv:2030-03-05", 10))
 assert sorted(s for (s,) in db.execute("SELECT start FROM tasks WHERE user_id = 10 AND title IN ('Купить хлеб', 'Позвонить маме')")) == [
     "2030-03-06", "2030-03-06T18:00"]
+
+# ── Память диалога: последние реплики, только свежие ──
+for i in range(8):
+    bot.remember(42, "Пользователь", f"реплика {i}")
+assert [x[2] for x in bot.dialogs[42]] == [f"реплика {i}" for i in range(2, 8)]
+assert "Пользователь: реплика 7" in bot.dialog_block(42) and bot.dialog_block(43) == ""
+bot.dialogs[42] = [(datetime.now(TZ) - bot.DIALOG_TTL, "Пользователь", "давно")]
+assert bot.dialog_block(42) == ""
+assert "v=" + bot.APP_VERSION in bot.app_url() and "task=5" in bot.app_url(task=5)
 print("ok")

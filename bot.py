@@ -68,6 +68,9 @@ BATCH_DELAY = 2.5  # столько секунд ждём следующих п�
 PLAN_HOURS = (9, 21)  # в эти часы ИИ раскладывает дела без времени
 WEEKLY_HOUR = 18  # воскресный обзор недели
 REPEATS = ("", "daily", "weekdays", "weekly", "monthly")
+APP_VERSION = str(int(Path(__file__).with_name("webapp.html").stat().st_mtime))  # меняется при каждой правке Mini App
+DIALOG_TURNS = 6  # сколько последних реплик ИИ видит, чтобы понимать уточнения («удали» → «какое?» → «универ»)
+DIALOG_TTL = timedelta(minutes=15)
 WEEKDAYS = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
 GROUP = F.chat.type.in_({"group", "supergroup"})
 
@@ -116,6 +119,9 @@ PROMPT = """Ты — ассистент-календарь в Telegram. Сейч
    коротко, простым текстом без markdown, только по списку задач. На вопрос о свободном времени называй свободные окна.
 4. Если непонятно, какую задачу менять, — спроси в reply и ничего не меняй.
 5. Сам ничего не меняешь: create/update пользователь подтверждает кнопкой, поэтому не пиши в reply «удалил», «перенёс».
+6. Если сообщение продолжает недавний диалог (ответ на твой уточняющий вопрос), выполни исходную просьбу целиком:
+   «удали» → «какое?» → «универ» = update с delete=true для задачи «универ». Не переспрашивай то, что уже ясно из диалога.
+7. «Найди/покажи задачу ...» → reply со списком подходящих задач: дата, время, название; ничего не создавай.
 Пустые create/update/reply — если ничего из этого нет. Ничего не выдумывай.
 
 Сообщение:
@@ -195,6 +201,8 @@ CARD_COLUMNS = ("title", "start", "location", "source", "description", "category
 
 dp = Dispatcher()
 BOT: Bot | None = None  # нужен веб-обработчикам, чтобы обновить кнопку меню при смене языка
+# ponytail: диалог хранится в памяти — после перезапуска бот забывает, о чём говорили; в базу, если станет важно.
+dialogs: dict[int, list[tuple[datetime, str, str]]] = {}
 batches: dict[int, list[Message]] = {}  # пересылки, которые ждут отправки в ИИ пачкой
 batch_timers: dict[int, asyncio.Task] = {}
 
@@ -556,12 +564,15 @@ def task_text(lang: str, uid: int, task_id: int) -> str:
     return card(lang, task) + "\n" + extras(lang, uid, task_id, task)
 
 
+def app_url(**query) -> str:
+    """Адрес Mini App; query открывает нужный экран: task+date — задачу, view=settings — настройки."""
+    return f"{PUBLIC_URL}/?{urlencode({'v': APP_VERSION, **query})}"
+
+
 def app_button(lang: str, key: str = "btn_open", **query) -> list[InlineKeyboardButton]:
-    """Кнопка Mini App; query открывает нужный экран: task+date — задачу, view=settings — настройки."""
     if not PUBLIC_URL:
         return []
-    url = f"{PUBLIC_URL}/?{urlencode(query)}" if query else PUBLIC_URL
-    return [InlineKeyboardButton(text=t(lang, key), web_app=WebAppInfo(url=url))]
+    return [InlineKeyboardButton(text=t(lang, key), web_app=WebAppInfo(url=app_url(**query)))]
 
 
 def keyboard(*rows: list[InlineKeyboardButton]) -> InlineKeyboardMarkup | None:
@@ -575,7 +586,7 @@ async def set_menu(bot: Bot | None, uid: int, lang: str) -> None:
     if bot and PUBLIC_URL:
         try:
             await bot.set_chat_menu_button(chat_id=uid, menu_button=MenuButtonWebApp(
-                text=t(lang, "menu"), web_app=WebAppInfo(url=PUBLIC_URL)))
+                text=t(lang, "menu"), web_app=WebAppInfo(url=app_url())))
         except TelegramAPIError as e:
             logging.info("menu %s: %s", uid, e)
 
@@ -751,11 +762,23 @@ async def send_proposal(bot: Bot, uid: int, lang: str, task_id: int, data: dict,
     await bot.send_message(uid, text, parse_mode="HTML", reply_markup=kb)
 
 
+def remember(uid: int, role: str, text: str) -> None:
+    turns = [x for x in dialogs.get(uid, []) if datetime.now(TZ) - x[0] < DIALOG_TTL]
+    dialogs[uid] = (turns + [(datetime.now(TZ), role, text[:500])])[-DIALOG_TURNS:]
+
+
+def dialog_block(uid: int) -> str:
+    turns = [f"{role}: {text}" for at, role, text in dialogs.get(uid, []) if datetime.now(TZ) - at < DIALOG_TTL]
+    return "\n\nНедавний диалог с пользователем (старые сверху):\n" + "\n".join(turns) if turns else ""
+
+
 async def respond(bot: Bot, chat_id: int, uid: int, text: str, ref: datetime, parts: list, mode: str) -> None:
     """Сообщение (или пачка) → ИИ → карточки задач, предложения правок или ответ на вопрос."""
     lang = lang_of(uid)
     await bot.send_chat_action(chat_id, "typing")
-    if (res := await analyze(text, ref, parts, mode, user_context(uid), lang)) is None:
+    res = await analyze(text, ref, parts, mode + dialog_block(uid), user_context(uid), lang)
+    remember(uid, "Пользователь", text)
+    if res is None:
         await bot.send_message(chat_id, t(lang, "ai_failed"))
         return
     acted = 0
@@ -763,7 +786,12 @@ async def respond(bot: Bot, chat_id: int, uid: int, text: str, ref: datetime, pa
         acted += await create_pending(bot, uid, lang, nt, "", None)
     for c in res.update:
         acted += await propose_change(bot, uid, lang, c.id, change_data(c))
+    if acted:
+        remember(uid, "Бот", "предложил кнопками: " + "; ".join(
+            [f"создать «{nt.title}»" for nt in res.create] +
+            [f"{'удалить' if c.delete else 'изменить'} задачу #{c.id}" for c in res.update]))
     if res.reply and not acted:  # при правках ответ ИИ не нужен — всё видно в карточках
+        remember(uid, "Бот", res.reply)
         await bot.send_message(chat_id, res.reply)
     elif not acted:
         await bot.send_message(chat_id, t(lang, "nothing_found"))
@@ -1594,7 +1622,8 @@ async def api_settings(request: web.Request) -> web.Response:
 
 
 async def index(request: web.Request) -> web.FileResponse:
-    return web.FileResponse(Path(__file__).with_name("webapp.html"))
+    # Telegram кэширует страницу Mini App; без этого пользователи видят старую версию после обновления.
+    return web.FileResponse(Path(__file__).with_name("webapp.html"), headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
 def make_app() -> web.Application:
@@ -1628,7 +1657,10 @@ async def setup_profile(bot: Bot) -> None:
         await bot.set_my_description(t(lang, "desc"), language_code=code)
         await bot.set_my_short_description(t(lang, "short_desc"), language_code=code)
     if PUBLIC_URL:
-        await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="Календарь", web_app=WebAppInfo(url=PUBLIC_URL)))
+        await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="Календарь", web_app=WebAppInfo(url=app_url())))
+        # ponytail: личная кнопка меню каждому пользователю при каждом запуске — O(users) запросов; при росте — только при смене версии.
+        for (uid,) in db.execute("SELECT id FROM users").fetchall():
+            await set_menu(bot, uid, lang_of(uid))
 
 
 async def main():
