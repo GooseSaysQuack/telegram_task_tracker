@@ -1,5 +1,22 @@
 <div align="center">
 
+# 🗓 Task Tracker для Telegram
+
+**Бот и Mini App, которые достают дела из твоих чатов и не дают их забыть.**
+
+Переслал сообщение, надиктовал голосовое или прислал скриншот — ИИ нашёл встречу, дедлайн или «забрать заказ»,
+положил в календарь, спланировал день и напомнил именно тогда, когда ты попросил.
+
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+![aiogram](https://img.shields.io/badge/aiogram-3-2CA5E0?logo=telegram&logoColor=white)
+![aiohttp](https://img.shields.io/badge/aiohttp-Mini_App_API-2C5BB4?logo=aiohttp&logoColor=white)
+![Gemini](https://img.shields.io/badge/Gemini-3.5_Flash--Lite-8E75B2?logo=googlegemini&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-встроенная-003B57?logo=sqlite&logoColor=white)
+![Telegram Mini Apps](https://img.shields.io/badge/Telegram-Mini_App-26A5E4?logo=telegram&logoColor=white)
+![Languages](https://img.shields.io/badge/языки-RU_·_EN_·_KY-6C5CE7)
+
+</div>
+
 ---
 
 ## 💡 Зачем
