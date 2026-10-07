@@ -6,8 +6,9 @@ import json
 import logging
 import os
 import re
+import secrets
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from functools import cache
 from html import escape
 from pathlib import Path
@@ -24,6 +25,10 @@ from aiogram.types import (
     ChatMemberUpdated,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InlineQuery,
+    InlineQueryResultArticle,
+    InlineQueryResultsButton,
+    InputTextMessageContent,
     MenuButtonWebApp,
     Message,
     ReactionTypeEmoji,
@@ -35,6 +40,9 @@ from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel
 
+import texts
+from texts import CATEGORIES, CATEGORY_ICONS, LANGS, PRIORITIES, t
+
 if Path(".env").exists():
     for line in Path(".env").read_text().splitlines():
         if "=" in line and not line.lstrip().startswith("#"):
@@ -42,7 +50,7 @@ if Path(".env").exists():
             os.environ.setdefault(k.strip(), v.strip())
 
 TZ = ZoneInfo(os.getenv("TIMEZONE", "Asia/Bishkek"))
-# Бесплатный лимит Gemini считается отдельно на каждую модель — при 429/503 пробуем следующую.
+# Бесплатный лимит Gemini считается отдельно на каждую модель — при отказе пробуем следующую.
 # Основная — самая быстрая из проверенных (~1–2 с на ответ); более тяжёлые «думают» 10–25 с.
 MODELS = [os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
           *filter(None, os.getenv("GEMINI_FALLBACKS", "gemini-3.1-flash-lite,gemini-flash-latest").split(","))]
@@ -52,46 +60,33 @@ PORT = int(os.getenv("PORT", "8080"))
 ALL_DAY_HOUR = 9  # от этого часа считаются напоминания для задач «на весь день»
 MAX_OFFSET = 30 * 24 * 60  # самое раннее напоминание — за 30 дней
 MAX_REMINDERS = 10
+MAX_SUBTASKS = 20
 SNOOZE_MINUTES = (15, 60)
 SERIES_HORIZON = timedelta(days=60)  # на сколько вперёд создаются повторы
 EVENT_LENGTH = timedelta(hours=1)  # считаем, что у задачи со временем длительность час
-REPEATS = {"": "", "daily": "каждый день", "weekdays": "по будням", "weekly": "каждую неделю", "monthly": "каждый месяц"}
+BATCH_DELAY = 2.5  # столько секунд ждём следующих пересылок, прежде чем отдать пачку ИИ одним запросом
+PLAN_HOURS = (9, 21)  # в эти часы ИИ раскладывает дела без времени
+WEEKLY_HOUR = 18  # воскресный обзор недели
+REPEATS = ("", "daily", "weekdays", "weekly", "monthly")
 WEEKDAYS = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
-WD_SHORT = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
-MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"]
-COMMANDS = [
-    BotCommand(command="today", description="Задачи на сегодня"),
-    BotCommand(command="tasks", description="Ближайшие задачи"),
-    BotCommand(command="settings", description="Напоминания, утренний план и вечерний итог"),
-    BotCommand(command="calendar", description="Показывать задачи в календаре телефона"),
-    BotCommand(command="help", description="Что умеет бот"),
-]
-GROUP_COMMANDS = [
-    BotCommand(command="task", description="Ответом на сообщение, голосовое или фото — сделать задачу"),
-    BotCommand(command="help", description="Как я работаю в чате"),
-]
 GROUP = F.chat.type.in_({"group", "supergroup"})
-
-# Тексты профиля бота: выставляются при запуске, в BotFather вводить не нужно.
-SHORT_DESCRIPTION = "Собираю дела из чатов, голосовых и скриншотов в календарь и напоминаю вовремя. ИИ-ассистент в Telegram."
-DESCRIPTION = (
-    "Забываешь договорённости в куче чатов? Я помогу.\n\n"
-    "📨 Перешли сообщение, надиктуй голосовое или пришли скриншот — найду встречи, дедлайны и дела\n"
-    "🗓 Сложу всё в календарь: прямо в Telegram и в календаре телефона\n"
-    "⏰ Напомню, когда нужно, а утром пришлю план на день\n"
-    "💬 Спроси: «что у меня завтра?» или «перенеси встречу на субботу»\n\n"
-    "Нажми «Старт» 👇"
-)
 
 # Дешёвый фильтр для групп: в LLM идут только сообщения с намёком на дату или дело.
 HINT = re.compile(
     r"\d{1,2}[:.]\d{2}|\d{1,2}\s*(?:янв|фев|мар|апр|ма[йя]|июн|июл|авг|сен|окт|ноя|дек)"
     r"|сегодня|завтра|понедельник|вторник|сред[ау]|четверг|пятниц|суббот|воскресен"
-    r"|встреч|созвон|митап|дедлайн|забрать|забери|не забудь|перенес|перенос|отмен",
+    r"|встреч|созвон|митап|дедлайн|забрать|забери|не забудь|перенес|перенос|отмен"
+    r"|today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|meeting|call|deadline"
+    r"|бүгүн|эртең|жолугуш|дүйшөмбү|шейшемби|шаршемби|бейшемби|жума|ишемби|жекшемби",
     re.I,
 )
 
-PROMPT = """Ты — ассистент-календарь в Telegram. Сейчас {now} ({weekday}).
+DIRECT_MODE = "Пользователь пишет тебе сам: это может быть новое дело, просьба изменить задачи или вопрос о расписании."
+FORWARD_MODE = "Пользователь переслал тебе сообщение из другого чата."
+BATCH_MODE = ("Пользователь переслал тебе подряд несколько сообщений одной переписки (формат: [время] отправитель: текст). "
+              "Пойми, о чём в итоге договорились: поздние сообщения уточняют и отменяют ранние. Не создавай дубликатов.")
+
+PROMPT = """Ты — ассистент-календарь в Telegram. Сейчас {now} ({weekday}). Поле reply пиши на языке: {lang}.
 {mode}
 
 Задачи пользователя (id | начало | название | место | описание | отметки):
@@ -104,6 +99,11 @@ PROMPT = """Ты — ассистент-календарь в Telegram. Сейч
      считай от момента отправки сообщения: {ref}; если даты нет — дата сообщения;
    - location: место или "";
    - description: важные детали одной-двумя фразами (с кем, что взять, номер заказа, ссылка) или "";
+   - category: work (работа, созвоны, проекты), personal (друзья, семья, отдых), shopping (купить, забрать заказ),
+     health (врач, спорт, лекарства), study (учёба, курсы, экзамены) или other;
+   - priority: high — срочно или важно (дедлайн, врач, самолёт, «важно»), low — необязательно («если успею»), иначе normal;
+   - subtasks: пункты, если в деле перечислены шаги или покупки («купить торт, шарики, свечи» → ["торт", "шарики", "свечи"]),
+     иначе [];
    - reminders: за сколько минут до начала напомнить, по типу дела: самолёт/поезд — [1440, 180];
      встреча/созвон — [60, 10]; врач, важная встреча — [1440, 60]; дедлайн — [1440, 180];
      «забрать/купить» без времени — [0]; не уверен — [];
@@ -113,7 +113,7 @@ PROMPT = """Ты — ассистент-календарь в Telegram. Сейч
    задачу → update с id этой задачи. В title/start/location/description — только НОВЫЕ значения, остальное "".
    Отмена или «удали» → delete=true. «Сделал», «отметь выполненным» → done=true. Не создавай дубликат существующей задачи.
 3. Вопрос о расписании («что у меня завтра», «когда я свободен в четверг», «что я обещал Мише») → ответ в reply:
-   коротко, по-русски, простым текстом без markdown, только по списку задач.
+   коротко, простым текстом без markdown, только по списку задач. На вопрос о свободном времени называй свободные окна.
 4. Если непонятно, какую задачу менять, — спроси в reply и ничего не меняй.
 5. Сам ничего не меняешь: create/update пользователь подтверждает кнопкой, поэтому не пиши в reply «удалил», «перенёс».
 Пустые create/update/reply — если ничего из этого нет. Ничего не выдумывай.
@@ -121,7 +121,23 @@ PROMPT = """Ты — ассистент-календарь в Telegram. Сейч
 Сообщение:
 {text}"""
 
+PLAN_PROMPT = """Ты планируешь день {day} ({weekday}).
+Встречи со временем — их не двигать, каждая длится 60 минут:
+{fixed}
+Дела без времени — их нужно расставить (id | название | приоритет | категория | описание):
+{free}
+Поставь каждое дело без времени в свободное окно между {start}:00 и {end}:00{after}. Оцени длительность в минутах (minutes),
+важное (high) ставь раньше, между делами оставляй 10–15 минут, не пересекайся со встречами и друг с другом.
+time — "HH:MM", кратно 5 минутам. comment — одна короткая дружелюбная фраза о плане на языке: {lang}."""
+
+WEEK_PROMPT = """Ты — ассистент-календарь. Задачи пользователя на ближайшие 7 дней (дата | время | название | категория | приоритет):
+{tasks}
+Напиши короткий обзор этих дней на языке: {lang}. 2–4 пункта, каждый с новой строки и начинается с «• ».
+Отметь самые загруженные дни и важные дела, дай 1–2 конкретных совета (что перенести, где оставить время на отдых).
+Простой текст без markdown."""
+
 db = sqlite3.connect(os.getenv("DB_PATH", "tasks.db"))
+db.create_function("py_lower", 1, lambda s: s.lower() if isinstance(s, str) else s, deterministic=True)  # LIKE в SQLite не понимает регистр кириллицы
 db.executescript("""
 CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS tasks (
@@ -133,11 +149,17 @@ CREATE TABLE IF NOT EXISTS tasks (
     source TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending'
 );
-CREATE TABLE IF NOT EXISTS changes (  -- предложенные ИИ правки, ждут подтверждения
+CREATE TABLE IF NOT EXISTS changes (  -- предложенные ИИ правки и планы дня, ждут подтверждения
     id INTEGER PRIMARY KEY,
     user_id INTEGER NOT NULL,
     task_id INTEGER NOT NULL,
     fields TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS trash (  -- удалённое из Mini App, чтобы можно было «Отменить»
+    batch TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    row TEXT NOT NULL,
+    at TEXT NOT NULL
 );
 """)
 for table, column in [
@@ -146,24 +168,35 @@ for table, column in [
     ("tasks", "sent TEXT NOT NULL DEFAULT ''"),  # какие из них уже отправлены
     ("tasks", "snooze TEXT"),  # «напомнить позже»: когда повторить
     ("tasks", "description TEXT NOT NULL DEFAULT ''"),
-    ("tasks", "repeat TEXT NOT NULL DEFAULT ''"),  # ключ из REPEATS
+    ("tasks", "repeat TEXT NOT NULL DEFAULT ''"),  # одно из REPEATS
     ("tasks", "series INTEGER"),  # id первой задачи серии повторов
     ("tasks", "chat_id INTEGER"),  # группа, из которой задача пришла
+    ("tasks", "category TEXT NOT NULL DEFAULT 'other'"),  # одно из CATEGORIES
+    ("tasks", "priority TEXT NOT NULL DEFAULT 'normal'"),  # одно из PRIORITIES
+    ("tasks", "subtasks TEXT NOT NULL DEFAULT '[]'"),  # JSON: [{"text": ..., "done": false}]
+    ("tasks", "origin TEXT NOT NULL DEFAULT 'ai'"),  # ai — нашёл ИИ, manual — вручную, shared — от собеседника
     ("users", "reminders TEXT NOT NULL DEFAULT '60'"),  # набор по умолчанию для новых задач
     ("users", "smart_reminders INTEGER NOT NULL DEFAULT 1"),  # ИИ подбирает напоминания под тип дела
     ("users", "digest_hour INTEGER DEFAULT 9"),  # час утреннего плана, NULL — выключен
     ("users", "digest_sent TEXT"),
-    ("users", "evening_hour INTEGER DEFAULT 21"),  # час вечернего итога, NULL — выключен
+    ("users", "evening_hour INTEGER DEFAULT 21"),  # час вечернего итога, NULL — выключен (и обзор недели тоже)
     ("users", "evening_sent TEXT"),
+    ("users", "weekly_sent TEXT"),
+    ("users", "lang TEXT"),  # одно из LANGS
 ]:
     try:
         db.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
     except sqlite3.OperationalError:  # колонка уже есть
         pass
 
-TASK_COLUMNS = {"title", "start", "location", "description", "reminders", "sent", "snooze", "done", "repeat", "status"}
+TASK_COLUMNS = {"title", "start", "location", "description", "reminders", "sent", "snooze", "done", "repeat", "status",
+                "category", "priority", "subtasks"}
+CARD_COLUMNS = ("title", "start", "location", "source", "description", "category", "priority", "subtasks", "reminders", "repeat")
 
 dp = Dispatcher()
+BOT: Bot | None = None  # нужен веб-обработчикам, чтобы обновить кнопку меню при смене языка
+batches: dict[int, list[Message]] = {}  # пересылки, которые ждут отправки в ИИ пачкой
+batch_timers: dict[int, asyncio.Task] = {}
 
 
 class NewTask(BaseModel):
@@ -171,6 +204,9 @@ class NewTask(BaseModel):
     start: str
     location: str
     description: str
+    category: str
+    priority: str
+    subtasks: list[str]
     reminders: list[int]
     repeat: str
 
@@ -191,12 +227,23 @@ class Result(BaseModel):
     update: list[Change]
 
 
+class PlanItem(BaseModel):
+    id: int
+    time: str
+    minutes: int
+
+
+class Plan(BaseModel):
+    items: list[PlanItem]
+    comment: str
+
+
 @cache
 def llm() -> genai.Client:
     return genai.Client(api_key=os.environ["GEMINI_API_KEY"], http_options={"timeout": LLM_TIMEOUT_MS})
 
 
-# ── Даты и подписи ───────────────────────────────────────────────
+# ── Даты ─────────────────────────────────────────────────────────
 
 def normalize(start: str) -> str | None:
     """Приводит дату к "YYYY-MM-DDTHH:MM" или "YYYY-MM-DD"; None — не дата."""
@@ -212,18 +259,9 @@ def fmt_like(d: datetime, start: str) -> str:
     return f"{d:%Y-%m-%dT%H:%M}" if "T" in start else f"{d:%Y-%m-%d}"
 
 
-def plural(n: int, one: str, few: str, many: str) -> str:
-    if n % 10 == 1 and n % 100 != 11:
-        return one
-    return few if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else many
-
-
-def human(start: str) -> str:
+def human(lang: str, start: str) -> str:
     d = datetime.fromisoformat(start)
-    today = datetime.now(TZ).date()
-    day = {today: "Сегодня", today + timedelta(days=1): "Завтра"}.get(
-        d.date(), f"{WD_SHORT[d.weekday()]}, {d.day} {MONTHS[d.month - 1]}"
-    )
+    day = texts.day_name(lang, d.date(), datetime.now(TZ).date())
     return f"{day}, {d:%H:%M}" if "T" in start else day
 
 
@@ -240,27 +278,18 @@ def clean_offsets(value) -> str | None:
     return ",".join(map(str, sorted(set(value), reverse=True)))
 
 
-def offset_label(m: int) -> str:
-    if m == 0:
-        return "в момент начала"
-    if m == 7 * 1440:
-        return "за неделю"
-    if m % 1440 == 0:
-        d = m // 1440
-        return "за день" if d == 1 else f"за {d} {plural(d, 'день', 'дня', 'дней')}"
-    h, mm = divmod(m, 60)
-    return "за " + " ".join(filter(None, [h and f"{h} ч", mm and f"{mm} мин"]))
-
-
-def time_left(delta: timedelta) -> str:
-    mins = round(delta.total_seconds() / 60)
-    if mins <= 1:
-        return "Начинается сейчас"
-    d, rest = divmod(mins, 1440)
-    h, m = divmod(rest, 60)
-    if d:
-        return f"Через {d} {plural(d, 'день', 'дня', 'дней')}" + (f" {h} ч" if h else "")
-    return "Через " + " ".join(filter(None, [h and f"{h} ч", m and f"{m} мин"]))
+def clean_subtasks(value) -> str | None:
+    """Подзадачи: строки или {"text", "done"}; None — мусор."""
+    if not isinstance(value, list) or len(value) > MAX_SUBTASKS:
+        return None
+    items = []
+    for item in value:
+        if isinstance(item, str):
+            item = {"text": item}
+        if not isinstance(item, dict) or not (text := str(item.get("text", "")).strip()[:100]):
+            return None
+        items.append({"text": text, "done": bool(item.get("done"))})
+    return json.dumps(items, ensure_ascii=False)
 
 
 def event_time(start: str) -> datetime:
@@ -270,10 +299,10 @@ def event_time(start: str) -> datetime:
 
 def due_offsets(start: str, offsets: list[int], sent: set[int], now: datetime) -> list[int]:
     """Напоминания, время которых пришло. После начала события (с запасом 2 мин) — уже ничего."""
-    t = event_time(start)
-    if now > t + timedelta(minutes=2):
+    t_ = event_time(start)
+    if now > t_ + timedelta(minutes=2):
         return []
-    return [m for m in offsets if m not in sent and now >= t - timedelta(minutes=m)]
+    return [m for m in offsets if m not in sent and now >= t_ - timedelta(minutes=m)]
 
 
 def next_occurrence(d: datetime, repeat: str) -> datetime:
@@ -292,6 +321,11 @@ def next_occurrence(d: datetime, repeat: str) -> datetime:
     return d.replace(year=y, month=m, day=min(d.day, cal_lib.monthrange(y, m)[1]))
 
 
+def like(q: str) -> str:
+    """Шаблон для LIKE ... ESCAPE '\\' из пользовательского текста."""
+    return "%" + q.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
 # ── Внешние календари ────────────────────────────────────────────
 
 def gcal_link(title: str, start: str, location: str, description: str = "") -> str:
@@ -304,10 +338,13 @@ def gcal_link(title: str, start: str, location: str, description: str = "") -> s
     return "https://calendar.google.com/calendar/render?" + urlencode(query)
 
 
+def sign(payload: str, length: int) -> str:
+    return hmac.new(os.environ["BOT_TOKEN"].encode(), payload.encode(), hashlib.sha256).hexdigest()[:length]
+
+
 def cal_path(uid: int) -> str:
     # ponytail: подпись от BOT_TOKEN — после /revoke токена старые ссылки на календарь перестанут работать.
-    sig = hmac.new(os.environ["BOT_TOKEN"].encode(), str(uid).encode(), hashlib.sha256).hexdigest()[:32]
-    return f"cal/{uid}-{sig}.ics"
+    return f"cal/{uid}-{sign(str(uid), 32)}.ics"
 
 
 def cal_links(uid: int) -> dict[str, str]:
@@ -324,10 +361,10 @@ def ics_escape(s: str) -> str:
     return s.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
 
 
-def ics(rows: list[tuple[int, str, str, str, str]]) -> str:
+def ics(rows: list[tuple[int, str, str, str, str]], name: str = "Задачи из Telegram") -> str:
     stamp = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
     lines = [
-        "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Task Tracker//RU", "X-WR-CALNAME:Задачи из Telegram",
+        "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Task Tracker//RU", f"X-WR-CALNAME:{ics_escape(name)}",
         "REFRESH-INTERVAL;VALUE=DURATION:PT15M", "X-PUBLISHED-TTL:PT15M",
     ]
     for task_id, title, start, location, description in rows:
@@ -347,11 +384,23 @@ def ics(rows: list[tuple[int, str, str, str, str]]) -> str:
     return "\r\n".join(lines) + "\r\n"
 
 
-# ── Задачи в базе ────────────────────────────────────────────────
+# ── Пользователи и задачи в базе ─────────────────────────────────
 
-def register(uid: int) -> None:
+def register(uid: int, code: str | None = None) -> str:
+    """Запоминает пользователя; язык — из Telegram, пока он не выбрал свой в настройках. Возвращает язык."""
     db.execute("INSERT OR IGNORE INTO users (id) VALUES (?)", (uid,))
+    db.execute("UPDATE users SET lang = ? WHERE id = ? AND lang IS NULL", (texts.lang_from_code(code), uid))
     db.commit()
+    return lang_of(uid)
+
+
+def lang_of(uid: int) -> str:
+    row = db.execute("SELECT lang FROM users WHERE id = ?", (uid,)).fetchone()
+    return row[0] if row and row[0] in LANGS else "ru"
+
+
+def is_user(uid: int) -> bool:
+    return bool(db.execute("SELECT 1 FROM users WHERE id = ?", (uid,)).fetchone())
 
 
 def clean_fields(data: dict) -> dict | None:
@@ -375,10 +424,15 @@ def clean_fields(data: dict) -> dict | None:
         fields |= {"reminders": reminders, "sent": ""}
     if "done" in data:
         fields["done"] = int(bool(data["done"]))
-    if "repeat" in data:
-        if data["repeat"] not in REPEATS:
+    for key, allowed in (("repeat", REPEATS), ("category", CATEGORIES), ("priority", PRIORITIES)):
+        if key in data:
+            if data[key] not in allowed:
+                return None
+            fields[key] = data[key]
+    if "subtasks" in data:
+        if (subtasks := clean_subtasks(data["subtasks"])) is None:
             return None
-        fields["repeat"] = data["repeat"]
+        fields["subtasks"] = subtasks
     return fields
 
 
@@ -392,22 +446,33 @@ def update_task(task_id: int, uid: int, fields: dict) -> None:
         db.commit()
 
 
+def task_dict(task_id: int) -> dict | None:
+    row = db.execute(f"SELECT {', '.join(CARD_COLUMNS)} FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    return dict(zip(CARD_COLUMNS, row)) if row else None
+
+
+def fresh_subtasks(subtasks: str) -> str:
+    """Те же пункты, но не отмеченные — для повторов и копий у собеседника."""
+    return json.dumps([{**s, "done": False} for s in json.loads(subtasks or "[]")], ensure_ascii=False)
+
+
 def extend_series(series: int, until: datetime) -> None:
     """Достраивает повторы серии до даты until, копируя последнюю задачу серии."""
     row = db.execute(
-        "SELECT user_id, title, start, location, description, source, chat_id, reminders, repeat FROM tasks"
-        " WHERE series = ? ORDER BY start DESC LIMIT 1",
+        "SELECT user_id, title, start, location, description, source, chat_id, reminders, repeat, category, priority,"
+        " subtasks, origin FROM tasks WHERE series = ? ORDER BY start DESC LIMIT 1",
         (series,),
     ).fetchone()
-    if not row or row[8] not in REPEATS or not row[8]:
+    if not row or not row[8] or row[8] not in REPEATS:
         return
-    uid, title, start, location, description, source, chat_id, reminders, repeat = row
+    uid, title, start, location, description, source, chat_id, reminders, repeat, category, priority, subtasks, origin = row
     d = datetime.fromisoformat(start)
     while (d := next_occurrence(d, repeat)) <= until.replace(tzinfo=None):
         db.execute(
-            "INSERT INTO tasks (user_id, title, start, location, description, source, chat_id, reminders, repeat,"
-            " series, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok')",
-            (uid, title, fmt_like(d, start), location, description, source, chat_id, reminders, repeat, series),
+            "INSERT INTO tasks (user_id, title, start, location, description, source, chat_id, reminders, repeat, series,"
+            " status, category, priority, subtasks, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
+            (uid, title, fmt_like(d, start), location, description, source, chat_id, reminders, repeat, series,
+             category, priority, fresh_subtasks(subtasks), origin),
         )
     db.commit()
 
@@ -424,52 +489,79 @@ def conflicts(uid: int, start: str, exclude: int = 0) -> list[tuple[str, str]]:
     """Задачи со временем, которые пересекаются с новой (каждая длится EVENT_LENGTH)."""
     if "T" not in start:
         return []
-    t = datetime.fromisoformat(start)
+    t_ = datetime.fromisoformat(start)
     return db.execute(
         "SELECT title, start FROM tasks WHERE user_id = ? AND id != ? AND status = 'ok' AND done = 0"
         " AND start LIKE '%T%' AND start > ? AND start < ? ORDER BY start",
-        (uid, exclude, fmt_like(t - EVENT_LENGTH, start), fmt_like(t + EVENT_LENGTH, start)),
+        (uid, exclude, fmt_like(t_ - EVENT_LENGTH, start), fmt_like(t_ + EVENT_LENGTH, start)),
     ).fetchall()
+
+
+def trash_tasks(uid: int, where: str, params: tuple) -> str:
+    """Удаляет задачи, сохранив копии для «Отменить». where — только строки из этого файла."""
+    cols = [r[1] for r in db.execute("PRAGMA table_info(tasks)")]
+    rows = db.execute(f"SELECT {', '.join(cols)} FROM tasks WHERE user_id = ? AND {where}", (uid, *params)).fetchall()
+    batch, now = secrets.token_hex(8), f"{datetime.now(TZ):%Y-%m-%dT%H:%M}"
+    db.execute("DELETE FROM trash WHERE user_id = ? AND at < ?", (uid, f"{datetime.now(TZ) - timedelta(days=1):%Y-%m-%dT%H:%M}"))
+    db.executemany("INSERT INTO trash (batch, user_id, row, at) VALUES (?, ?, ?, ?)",
+                   [(batch, uid, json.dumps(dict(zip(cols, r)), ensure_ascii=False), now) for r in rows])
+    db.execute(f"DELETE FROM tasks WHERE user_id = ? AND {where}", (uid, *params))
+    db.commit()
+    return batch
+
+
+def restore_tasks(uid: int, batch: str) -> int:
+    cols = {r[1] for r in db.execute("PRAGMA table_info(tasks)")}
+    rows = db.execute("SELECT row FROM trash WHERE batch = ? AND user_id = ?", (batch, uid)).fetchall()
+    for (row,) in rows:
+        data = {k: v for k, v in json.loads(row).items() if k in cols}  # имена колонок — из самой базы
+        db.execute(f"INSERT OR IGNORE INTO tasks ({', '.join(data)}) VALUES ({', '.join('?' * len(data))})",
+                   tuple(data.values()))
+    db.execute("DELETE FROM trash WHERE batch = ? AND user_id = ?", (batch, uid))
+    db.commit()
+    return len(rows)
 
 
 # ── Тексты и кнопки ──────────────────────────────────────────────
 
-def card(title: str, start: str, location: str = "", source: str = "", description: str = "") -> str:
+def card(lang: str, task: dict) -> str:
     """HTML-карточка задачи; всё пользовательское экранируется."""
-    lines = [
-        f"<b>{escape(title)}</b>",
-        f"🗓 {human(start)}",
-        location and f"📍 {escape(location)}",
-        description and f"📝 {escape(description)}",
-        source and f"💬 {escape(source)}",
-    ]
-    return "\n".join(filter(None, lines))
-
-
-def extras(uid: int, task_id: int, start: str, reminders: str, repeat: str) -> str:
-    """Строки под карточкой: напоминания, повтор, пересечения."""
-    offsets = parse_offsets(reminders)
-    lines = ["🔔 Напомню " + ", ".join(map(offset_label, offsets)) if offsets else "🔕 Без напоминаний"]
-    if repeat:
-        lines.append(f"🔁 Повторять {REPEATS[repeat]}")
-    if clash := conflicts(uid, start, task_id):
-        lines.append("⚠️ В это время уже: " + ", ".join(f"{s[11:16]} {escape(t)}" for t, s in clash))
+    icon = CATEGORY_ICONS.get(task.get("category"), "📌")
+    lines = [f"{icon} <b>{escape(task['title'])}</b>", f"🗓 {human(lang, task['start'])}"]
+    if task.get("priority") == "high":
+        lines[0] += " 🔥"
+    if task.get("location"):
+        lines.append(f"📍 {escape(task['location'])}")
+    if task.get("description"):
+        lines.append(f"📝 {escape(task['description'])}")
+    lines += [f"{'☑️' if s['done'] else '▫️'} {escape(s['text'])}" for s in json.loads(task.get("subtasks") or "[]")]
+    if task.get("source"):
+        lines.append(f"💬 {escape(task['source'])}")
     return "\n".join(lines)
 
 
-def task_text(task_id: int, uid: int) -> str:
-    title, start, location, source, description, reminders, repeat = db.execute(
-        "SELECT title, start, location, source, description, reminders, repeat FROM tasks WHERE id = ?", (task_id,)
-    ).fetchone()
-    return card(title, start, location, source, description) + "\n" + extras(uid, task_id, start, reminders, repeat)
+def extras(lang: str, uid: int, task_id: int, task: dict) -> str:
+    """Строки под карточкой: напоминания, повтор, пересечения."""
+    offsets = parse_offsets(task["reminders"])
+    lines = [t(lang, "remind", list=", ".join(texts.offset_label(lang, m) for m in offsets)) if offsets else t(lang, "no_remind")]
+    if task["repeat"]:
+        lines.append(t(lang, "repeat", label=t(lang, f"rep_{task['repeat']}")))
+    if clash := conflicts(uid, task["start"], task_id):
+        lines.append(t(lang, "conflict", list=", ".join(f"{s[11:16]} {escape(x)}" for x, s in clash)))
+    return "\n".join(lines)
 
 
-def app_button(text: str = "🗓 Открыть календарь", **query) -> list[InlineKeyboardButton]:
+def task_text(lang: str, uid: int, task_id: int) -> str:
+    task = task_dict(task_id)
+    return card(lang, task) + "\n" + extras(lang, uid, task_id, task)
+
+
+def app_button(lang: str, key: str = "btn_open", **query) -> list[InlineKeyboardButton]:
     """Кнопка Mini App; query открывает нужный экран: task+date — задачу, view=settings — настройки."""
     if not PUBLIC_URL:
         return []
     url = f"{PUBLIC_URL}/?{urlencode(query)}" if query else PUBLIC_URL
-    return [InlineKeyboardButton(text=text, web_app=WebAppInfo(url=url))]
+    return [InlineKeyboardButton(text=t(lang, key), web_app=WebAppInfo(url=url))]
 
 
 def keyboard(*rows: list[InlineKeyboardButton]) -> InlineKeyboardMarkup | None:
@@ -478,7 +570,39 @@ def keyboard(*rows: list[InlineKeyboardButton]) -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
 
 
+async def set_menu(bot: Bot | None, uid: int, lang: str) -> None:
+    """Кнопка «Календарь» у поля ввода — на языке пользователя."""
+    if bot and PUBLIC_URL:
+        try:
+            await bot.set_chat_menu_button(chat_id=uid, menu_button=MenuButtonWebApp(
+                text=t(lang, "menu"), web_app=WebAppInfo(url=PUBLIC_URL)))
+        except TelegramAPIError as e:
+            logging.info("menu %s: %s", uid, e)
+
+
+def start_button(lang: str, bot_username: str) -> list[InlineKeyboardButton]:
+    return [InlineKeyboardButton(text=t(lang, "btn_get_tasks"), url=f"https://t.me/{bot_username}?start=group")]
+
+
 # ── ИИ ───────────────────────────────────────────────────────────
+
+async def ask_model(contents: list, schema=None):
+    """Запрос к Gemini с перебором моделей; schema=None — ответ простым текстом."""
+    config = {"response_mime_type": "application/json", "response_schema": schema} if schema else None
+    for attempt in range(2):
+        for model in MODELS:
+            try:
+                resp = await llm().aio.models.generate_content(model=model, contents=contents, config=config)
+                return resp.parsed if schema else resp.text
+            except errors.APIError as e:
+                if e.code not in (404, 429, 500, 503):  # нет модели, лимит или перегрузка — пробуем дальше
+                    raise
+                logging.warning("gemini %s: %s", model, e.code)
+            except TimeoutError:
+                logging.warning("gemini %s: timeout", model)
+        await asyncio.sleep(5)
+    raise RuntimeError("все модели Gemini недоступны")
+
 
 def context_lines(rows) -> str:
     lines = []
@@ -521,37 +645,34 @@ async def media_parts(m: Message) -> list:
     return [types.Part.from_bytes(data=data.read(), mime_type=mime)]
 
 
-async def analyze(m: Message, mode: str, tasks: str) -> Result | None:
-    """Один запрос к Gemini: что сделать с сообщением. None — ошибка."""
-    now = datetime.now(TZ)
+async def message_input(m: Message) -> tuple[str, datetime, list]:
+    """Текст, момент отправки (для «завтра») и вложения сообщения."""
     ref = (m.forward_origin.date if m.forward_origin else m.date).astimezone(TZ)
     attached = "голосовое" if m.voice else "изображение"
-    text = m.text or m.caption or f"(текста нет — {attached} во вложении)"
+    return m.text or m.caption or f"(текста нет — {attached} во вложении)", ref, await media_parts(m)
+
+
+def origin_name(m: Message) -> str:
+    """Кто написал пересланное сообщение."""
+    o = m.forward_origin
+    for attr in ("sender_user", "sender_chat", "chat"):
+        if x := getattr(o, attr, None):
+            return getattr(x, "first_name", None) or getattr(x, "title", None) or "?"
+    return getattr(o, "sender_user_name", None) or "?"
+
+
+async def analyze(text: str, ref: datetime, parts: list, mode: str, tasks: str, lang: str) -> Result | None:
+    """Один запрос к Gemini: что сделать с сообщением. None — ошибка."""
+    now = datetime.now(TZ)
     prompt = PROMPT.format(
-        now=f"{now:%Y-%m-%d %H:%M}", weekday=WEEKDAYS[now.weekday()], mode=mode, tasks=tasks,
-        ref=f"{ref:%Y-%m-%d %H:%M} ({WEEKDAYS[ref.weekday()]})", text=text,
+        now=f"{now:%Y-%m-%d %H:%M}", weekday=WEEKDAYS[now.weekday()], lang=texts.LANG_NAMES[lang], mode=mode,
+        tasks=tasks, ref=f"{ref:%Y-%m-%d %H:%M} ({WEEKDAYS[ref.weekday()]})", text=text,
     )
     try:
-        contents = [prompt, *await media_parts(m)]
-        for attempt in range(2):
-            for model in MODELS:
-                try:
-                    resp = await llm().aio.models.generate_content(
-                        model=model,
-                        contents=contents,
-                        config={"response_mime_type": "application/json", "response_schema": Result},
-                    )
-                    return resp.parsed
-                except errors.APIError as e:
-                    if e.code not in (404, 429, 500, 503):  # нет модели, лимит или перегрузка — пробуем дальше
-                        raise
-                    logging.warning("gemini %s: %s", model, e.code)
-                except TimeoutError:
-                    logging.warning("gemini %s: timeout", model)
-            await asyncio.sleep(5)
-    except Exception as e:  # сеть, неверный ключ
+        return await ask_model([prompt, *parts], Result)
+    except Exception as e:  # сеть, неверный ключ, все модели недоступны
         logging.warning("gemini: %s", e)
-    return None
+        return None
 
 
 def change_data(c: Change) -> dict:
@@ -562,245 +683,374 @@ def change_data(c: Change) -> dict:
     return data | ({"done": True} if c.done else {})
 
 
-async def create_pending(bot: Bot, uid: int, t: NewTask, source: str, chat_id: int | None) -> bool:
-    if not (start := normalize(t.start)) or not t.title.strip():
+async def create_pending(bot: Bot, uid: int, lang: str, nt: NewTask, source: str, chat_id: int | None) -> bool:
+    if not (start := normalize(nt.start)) or not nt.title.strip():
         return False
     smart, default = db.execute("SELECT smart_reminders, reminders FROM users WHERE id = ?", (uid,)).fetchone() or (1, "60")
-    reminders = (smart and t.reminders and clean_offsets(t.reminders)) or default
+    reminders = (smart and nt.reminders and clean_offsets(nt.reminders)) or default
+    subtasks = clean_subtasks([s for s in nt.subtasks if s.strip()][:MAX_SUBTASKS]) or "[]"
     task_id = db.execute(
-        "INSERT INTO tasks (user_id, title, start, location, description, source, chat_id, reminders, repeat)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (uid, t.title.strip()[:100], start, t.location[:100], t.description[:500], source, chat_id, reminders,
-         t.repeat if t.repeat in REPEATS else ""),
+        "INSERT INTO tasks (user_id, title, start, location, description, source, chat_id, reminders, repeat, category,"
+        " priority, subtasks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (uid, nt.title.strip()[:100], start, nt.location[:100], nt.description[:500], source, chat_id, reminders,
+         nt.repeat if nt.repeat in REPEATS else "", nt.category if nt.category in CATEGORIES else "other",
+         nt.priority if nt.priority in PRIORITIES else "normal", subtasks),
     ).lastrowid
     db.commit()
     kb = keyboard([
-        InlineKeyboardButton(text="✅ Добавить", callback_data=f"ok:{task_id}"),
+        InlineKeyboardButton(text=t(lang, "btn_add"), callback_data=f"ok:{task_id}"),
         InlineKeyboardButton(text="✕", callback_data=f"no:{task_id}"),
     ])
-    await bot.send_message(uid, task_text(task_id, uid), parse_mode="HTML", reply_markup=kb)
+    await bot.send_message(uid, task_text(lang, uid, task_id), parse_mode="HTML", reply_markup=kb)
     return True
 
 
-def change_text(uid: int, task_id: int, data: dict) -> str | None:
+def change_text(lang: str, uid: int, task_id: int, data: dict) -> str | None:
     """Описание правки «было → стало»; None — менять нечего."""
-    title, start, location, description, done = db.execute(
-        "SELECT title, start, location, description, done FROM tasks WHERE id = ?", (task_id,)
-    ).fetchone()
+    task = task_dict(task_id)
     if data.get("delete"):
-        return "🗑 <b>Удалить задачу?</b>\n\n" + card(title, start, location, description=description)
+        return t(lang, "ch_delete") + "\n\n" + card(lang, task)
+    done = db.execute("SELECT done FROM tasks WHERE id = ?", (task_id,)).fetchone()[0]
     lines = []
-    if data.get("title", title) != title:
-        lines.append(f"📌 {escape(title)} → <b>{escape(data['title'])}</b>")
-    if data.get("start", start) != start:
-        lines.append(f"🗓 {human(start)} → <b>{human(data['start'])}</b>")
+    if data.get("title", task["title"]) != task["title"]:
+        lines.append(f"📌 {escape(task['title'])} → <b>{escape(data['title'])}</b>")
+    if data.get("start", task["start"]) != task["start"]:
+        lines.append(f"🗓 {human(lang, task['start'])} → <b>{human(lang, data['start'])}</b>")
         if clash := conflicts(uid, data["start"], task_id):
-            lines.append("⚠️ В это время уже: " + ", ".join(f"{s[11:16]} {escape(t)}" for t, s in clash))
-    if data.get("location", location) != location:
-        lines.append(f"📍 {escape(location or '—')} → <b>{escape(data['location'])}</b>")
-    if data.get("description", description) != description:
+            lines.append(t(lang, "conflict", list=", ".join(f"{s[11:16]} {escape(x)}" for x, s in clash)))
+    if data.get("location", task["location"]) != task["location"]:
+        lines.append(f"📍 {escape(task['location'] or '—')} → <b>{escape(data['location'])}</b>")
+    if data.get("description", task["description"]) != task["description"]:
         lines.append(f"📝 <b>{escape(data['description'])}</b>")
     if data.get("done") and not done:
-        lines.append("✅ Отметить выполненной")
-    return f"✏️ <b>Изменить «{escape(title)}»?</b>\n\n" + "\n".join(lines) if lines else None
+        lines.append(t(lang, "ch_done"))
+    return t(lang, "ch_edit", title=escape(task["title"])) + "\n\n" + "\n".join(lines) if lines else None
 
 
-async def propose_change(bot: Bot, uid: int, task_id: int, data: dict) -> bool:
+async def propose_change(bot: Bot, uid: int, lang: str, task_id: int, data: dict) -> bool:
     """Правка от ИИ не применяется сразу — пользователь подтверждает её кнопкой."""
     if not db.execute("SELECT 1 FROM tasks WHERE id = ? AND user_id = ?", (task_id, uid)).fetchone():
         return False  # ИИ ошибся с id или это чужая задача
     if not data.get("delete") and not (data := clean_fields(data)):
         return False
-    if not (text := change_text(uid, task_id, data)):
+    if not (text := change_text(lang, uid, task_id, data)):
         return False
+    await send_proposal(bot, uid, lang, task_id, data, text)
+    return True
+
+
+async def send_proposal(bot: Bot, uid: int, lang: str, task_id: int, data: dict, text: str) -> None:
     change_id = db.execute(
         "INSERT INTO changes (user_id, task_id, fields) VALUES (?, ?, ?)", (uid, task_id, json.dumps(data))
     ).lastrowid
     db.commit()
     kb = keyboard([
-        InlineKeyboardButton(text="✅ Применить", callback_data=f"ch:ok:{change_id}"),
+        InlineKeyboardButton(text=t(lang, "btn_apply"), callback_data=f"ch:ok:{change_id}"),
         InlineKeyboardButton(text="✕", callback_data=f"ch:no:{change_id}"),
     ])
     await bot.send_message(uid, text, parse_mode="HTML", reply_markup=kb)
-    return True
 
 
-# ── Команды и сообщения ──────────────────────────────────────────
+async def respond(bot: Bot, chat_id: int, uid: int, text: str, ref: datetime, parts: list, mode: str) -> None:
+    """Сообщение (или пачка) → ИИ → карточки задач, предложения правок или ответ на вопрос."""
+    lang = lang_of(uid)
+    await bot.send_chat_action(chat_id, "typing")
+    if (res := await analyze(text, ref, parts, mode, user_context(uid), lang)) is None:
+        await bot.send_message(chat_id, t(lang, "ai_failed"))
+        return
+    acted = 0
+    for nt in res.create:
+        acted += await create_pending(bot, uid, lang, nt, "", None)
+    for c in res.update:
+        acted += await propose_change(bot, uid, lang, c.id, change_data(c))
+    if res.reply and not acted:  # при правках ответ ИИ не нужен — всё видно в карточках
+        await bot.send_message(chat_id, res.reply)
+    elif not acted:
+        await bot.send_message(chat_id, t(lang, "nothing_found"))
+
+
+async def flush_batch(bot: Bot, chat_id: int, uid: int) -> None:
+    """Через BATCH_DELAY после последней пересылки — вся пачка одним запросом к ИИ."""
+    await asyncio.sleep(BATCH_DELAY)
+    batch_timers.pop(uid, None)
+    msgs = batches.pop(uid, [])
+    if not msgs:
+        return
+    try:
+        if len(msgs) == 1:
+            text, mode = msgs[0].text or msgs[0].caption, FORWARD_MODE
+        else:
+            text = "\n".join(f"[{x.forward_origin.date.astimezone(TZ):%Y-%m-%d %H:%M}] {origin_name(x)}: {x.text or x.caption}"
+                             for x in msgs)
+            mode = BATCH_MODE
+        await respond(bot, chat_id, uid, text, msgs[-1].forward_origin.date.astimezone(TZ), [], mode)
+    except Exception:
+        logging.exception("batch")
+
+
+# ── Планирование дня и обзор недели ──────────────────────────────
+
+async def make_plan(uid: int, day: str, lang: str) -> tuple[list[dict], str] | None:
+    """ИИ расставляет дела без времени по свободным окнам. None — ошибка ИИ, [] — расставлять нечего."""
+    rows = db.execute(
+        "SELECT id, title, start, priority, category, description FROM tasks"
+        " WHERE user_id = ? AND status = 'ok' AND done = 0 AND substr(start, 1, 10) = ? ORDER BY start",
+        (uid, day),
+    ).fetchall()
+    free = {r[0]: r for r in rows if "T" not in r[2]}
+    if not free:
+        return [], ""
+    now = datetime.now(TZ)
+    d = date.fromisoformat(day)
+    prompt = PLAN_PROMPT.format(
+        day=day, weekday=WEEKDAYS[d.weekday()], lang=texts.LANG_NAMES[lang],
+        fixed="\n".join(f"{r[2][11:16]} {r[1]}" for r in rows if "T" in r[2]) or "(нет)",
+        free="\n".join(f"{r[0]} | {r[1]} | {r[3]} | {r[4]} | {r[5] or '-'}" for r in free.values()),
+        start=PLAN_HOURS[0], end=PLAN_HOURS[1], after=f", не раньше {now:%H:%M}" if d == now.date() else "",
+    )
+    try:
+        plan = await ask_model([prompt], Plan)
+    except Exception as e:
+        logging.warning("plan: %s", e)
+        return None
+    items = {}
+    for it in plan.items:
+        if it.id in free and it.id not in items and re.fullmatch(r"\d{2}:\d{2}", it.time) and normalize(f"{day}T{it.time}"):
+            items[it.id] = {"id": it.id, "title": free[it.id][1], "start": f"{day}T{it.time}",
+                            "minutes": max(5, min(it.minutes, 600))}
+    return sorted(items.values(), key=lambda i: i["start"]), plan.comment
+
+
+def plan_text(lang: str, day: str, items: list[dict], comment: str) -> str:
+    lines = [t(lang, "plan_header", day=texts.day_name(lang, date.fromisoformat(day), datetime.now(TZ).date())), ""]
+    for i in items:
+        start = datetime.fromisoformat(i["start"])
+        lines.append(f"{start:%H:%M}–{start + timedelta(minutes=i['minutes']):%H:%M}  {escape(i['title'])}")
+    return "\n".join(lines) + (f"\n\n{escape(comment)}" if comment else "")
+
+
+async def send_plan(bot: Bot, chat_id: int, uid: int, day: str) -> None:
+    lang = lang_of(uid)
+    await bot.send_chat_action(chat_id, "typing")
+    if (result := await make_plan(uid, day, lang)) is None:
+        await bot.send_message(chat_id, t(lang, "plan_failed"))
+        return
+    items, comment = result
+    if not items:
+        await bot.send_message(chat_id, t(lang, "plan_nothing"))
+        return
+    await send_proposal(bot, uid, lang, 0, {"plan": [[i["id"], i["start"]] for i in items]},
+                        plan_text(lang, day, items, comment))
+
+
+def apply_plan(uid: int, plan: list) -> int:
+    applied = 0
+    for task_id, start in plan:
+        if (fields := clean_fields({"start": start})) and \
+                db.execute("SELECT 1 FROM tasks WHERE id = ? AND user_id = ?", (task_id, uid)).fetchone():
+            update_task(task_id, uid, fields)
+            applied += 1
+    return applied
+
+
+def week_stats(uid: int, monday: date) -> dict:
+    rows = db.execute(
+        "SELECT category, done, origin FROM tasks WHERE user_id = ? AND status = 'ok' AND start >= ? AND start < ?",
+        (uid, f"{monday}", f"{monday + timedelta(days=7)}"),
+    ).fetchall()
+    by_category = {}
+    for category, done, _ in rows:
+        stat = by_category.setdefault(category, [0, 0])
+        stat[0] += done
+        stat[1] += 1
+    return {"total": len(rows), "done": sum(r[1] for r in rows), "ai": sum(r[2] == "ai" for r in rows),
+            "by_category": by_category}
+
+
+async def week_text(uid: int, lang: str, today: date) -> str:
+    """Продуктивность текущей недели + обзор следующих 7 дней от ИИ."""
+    monday = today - timedelta(days=today.weekday())
+    s = week_stats(uid, monday)
+    lines = [t(lang, "week_header", range=f"{monday:%d.%m}–{monday + timedelta(days=6):%d.%m}")]
+    if s["total"]:
+        lines.append(t(lang, "week_done", done=s["done"], total=s["total"], pct=round(100 * s["done"] / s["total"])))
+        if s["ai"]:
+            lines.append(t(lang, "week_ai", items=texts.word(lang, "item", s["ai"])))
+        lines.append(" · ".join(f"{CATEGORY_ICONS.get(c, '📌')} {t(lang, f'cat_{c}')} {d}/{n}"
+                                for c, (d, n) in sorted(s["by_category"].items(), key=lambda kv: -kv[1][1])))
+    else:
+        lines.append(t(lang, "week_empty"))
+    tomorrow = today + timedelta(days=1)
+    upcoming = db.execute(
+        "SELECT start, title, category, priority FROM tasks WHERE user_id = ? AND status = 'ok' AND done = 0"
+        " AND start >= ? AND start < ? ORDER BY start",
+        (uid, f"{tomorrow}", f"{tomorrow + timedelta(days=7)}"),
+    ).fetchall()
+    lines += ["", t(lang, "week_next")]
+    if not upcoming:
+        lines.append(t(lang, "week_next_empty"))
+        return "\n".join(lines)
+    listing = "\n".join(f"{s_[:10]} | {s_[11:16] or 'весь день'} | {title} | {cat} | {prio}" for s_, title, cat, prio in upcoming)
+    try:
+        overview = (await ask_model([WEEK_PROMPT.format(tasks=listing, lang=texts.LANG_NAMES[lang])])).strip()
+    except Exception as e:
+        logging.warning("week: %s", e)
+        overview = None
+    if overview:
+        lines.append(escape(overview))
+    else:  # без ИИ — просто сколько дел по дням
+        per_day = {}
+        for s_, *_ in upcoming:
+            per_day[s_[:10]] = per_day.get(s_[:10], 0) + 1
+        lines += [f"• {texts.day_name(lang, date.fromisoformat(d), today)} — {texts.word(lang, 'item', n)}" for d, n in per_day.items()]
+    return "\n".join(lines)
+
+
+# ── Команды и сообщения в личке ──────────────────────────────────
 
 @dp.message(Command("start", "help"), F.chat.type == "private")
 async def start(m: Message):
-    register(m.from_user.id)
+    lang = register(m.from_user.id, m.from_user.language_code)
+    me = await m.bot.me()
+    await set_menu(m.bot, m.from_user.id, lang)
     name = escape(m.from_user.first_name or "")
-    await m.answer(
-        f"<b>Привет{', ' + name if name else ''}! Я собираю твои дела из чатов.</b>\n\n"
-        "📨 Пересылай мне сообщения про встречи и дела\n"
-        "🎙 Надиктуй голосовое: «завтра в 10 стоматолог»\n"
-        "📸 Пришли скриншот переписки, афишу или билет\n"
-        "👥 Добавь меня в рабочий чат — замечу и новые дела, и переносы\n\n"
-        "<b>Можно просто написать</b>\n"
-        "• «что у меня завтра?», «когда я свободен в четверг?»\n"
-        "• «перенеси встречу с Мишей на субботу», «отмени стоматолога»\n"
-        "• «каждый вторник в 10 планёрка»\n\n"
-        "⏰ Напомню, когда нужно — сам подберу время под тип дела\n"
-        "☀️ Утром пришлю план, 🌙 вечером — что не успел\n\n"
-        "<b>Команды</b>\n"
-        "/today — задачи на сегодня\n"
-        "/tasks — ближайшие задачи\n"
-        "/settings — напоминания, утренний план и вечерний итог\n"
-        "/calendar — показывать задачи в календаре телефона\n"
-        "/help — эта подсказка",
-        parse_mode="HTML",
-        reply_markup=keyboard(app_button()),
-    )
+    await m.answer(t(lang, "help", name=f", {name}" if name else "", bot=me.username), parse_mode="HTML",
+                   reply_markup=keyboard(app_button(lang)))
 
 
 @dp.message(Command("settings"), F.chat.type == "private")
 async def settings(m: Message):
-    register(m.from_user.id)
+    lang = register(m.from_user.id, m.from_user.language_code)
     if not PUBLIC_URL:
-        await m.answer("Настройки пока недоступны: не задан PUBLIC_URL.")
+        await m.answer(t(lang, "no_public_url"))
         return
-    await m.answer(
-        "Когда и сколько раз напоминать, утренний план и вечерний итог — всё в настройках:",
-        reply_markup=keyboard(app_button("⚙️ Открыть настройки", view="settings")),
-    )
+    await m.answer(t(lang, "settings_text"), reply_markup=keyboard(app_button(lang, "btn_settings", view="settings")))
 
 
 @dp.message(Command("calendar"), F.chat.type == "private")
 async def calendar(m: Message):
+    lang = register(m.from_user.id, m.from_user.language_code)
     if not PUBLIC_URL:
-        await m.answer("Календарь пока недоступен: не задан PUBLIC_URL.")
+        await m.answer(t(lang, "no_public_url"))
         return
     links = cal_links(m.from_user.id)
-    await m.answer(
-        "Подключи календарь один раз — подтверждённые задачи будут появляться в нём сами.\n\n"
-        f"Другой календарь — добавь его по ссылке:\n{links['url']}",
-        reply_markup=keyboard(
-            [InlineKeyboardButton(text="🍎 iPhone / Mac", url=links["apple"])],
-            [InlineKeyboardButton(text="📅 Google Календарь", url=links["google"])],
-        ),
-    )
+    await m.answer(t(lang, "calendar_text", url=links["url"]), reply_markup=keyboard(
+        [InlineKeyboardButton(text=t(lang, "btn_iphone"), url=links["apple"])],
+        [InlineKeyboardButton(text=t(lang, "btn_google"), url=links["google"])],
+    ))
 
 
-async def agenda(m: Message, start_from: str, start_to: str, empty: str) -> None:
+async def agenda(m: Message, start_from: str, start_to: str, empty_key: str) -> None:
+    lang = register(m.from_user.id, m.from_user.language_code)
     rows = db.execute(
-        "SELECT title, start FROM tasks WHERE user_id = ? AND status = 'ok' AND done = 0 AND start >= ? AND start < ?"
-        " ORDER BY start LIMIT 20",
+        "SELECT title, start, category, priority FROM tasks WHERE user_id = ? AND status = 'ok' AND done = 0"
+        " AND start >= ? AND start < ? ORDER BY start LIMIT 20",
         (m.from_user.id, start_from, start_to),
     ).fetchall()
-    text = "\n".join(f"• {human(s)} — {escape(t)}" for t, s in rows) or empty
-    await m.answer(text, parse_mode="HTML", reply_markup=keyboard(app_button()))
+    text = "\n".join(f"{CATEGORY_ICONS.get(c, '📌')} {human(lang, s)} — {escape(x)}{' 🔥' if p == 'high' else ''}"
+                     for x, s, c, p in rows) or t(lang, empty_key)
+    await m.answer(text, parse_mode="HTML", reply_markup=keyboard(app_button(lang)))
 
 
 @dp.message(Command("today"), F.chat.type == "private")
 async def today(m: Message):
     now = datetime.now(TZ)
-    await agenda(m, f"{now:%Y-%m-%d}", f"{now + timedelta(days=1):%Y-%m-%d}", "На сегодня задач нет 🎉")
+    await agenda(m, f"{now:%Y-%m-%d}", f"{now + timedelta(days=1):%Y-%m-%d}", "today_empty")
 
 
 @dp.message(Command("tasks"), F.chat.type == "private")
 async def tasks(m: Message):
-    await agenda(m, f"{datetime.now(TZ):%Y-%m-%d}", "9999", "Задач нет.")
+    await agenda(m, f"{datetime.now(TZ):%Y-%m-%d}", "9999", "tasks_empty")
 
 
-# ponytail: каждое пересланное сообщение — отдельный запрос к Gemini; при упоре в лимиты склеивать пачку пересылок.
+@dp.message(Command("plan"), F.chat.type == "private")
+async def plan(m: Message):
+    register(m.from_user.id, m.from_user.language_code)
+    await send_plan(m.bot, m.chat.id, m.from_user.id, f"{datetime.now(TZ):%Y-%m-%d}")
+
+
+@dp.message(Command("week"), F.chat.type == "private")
+async def week(m: Message):
+    lang = register(m.from_user.id, m.from_user.language_code)
+    await m.bot.send_chat_action(m.chat.id, "typing")
+    text = await week_text(m.from_user.id, lang, datetime.now(TZ).date())
+    await m.answer(text, parse_mode="HTML", reply_markup=keyboard(app_button(lang)))
+
+
 @dp.message(F.chat.type == "private", F.text | F.caption | F.voice | F.photo | F.document)
 async def private(m: Message):
+    uid = m.from_user.id
+    lang = register(uid, m.from_user.language_code)
     if (m.text or "").startswith("/"):  # неизвестная команда — не тратим запрос к ИИ
-        await m.answer("Не знаю такой команды. Список — /help")
+        await m.answer(t(lang, "unknown_cmd"))
         return
     if m.document and not (m.document.mime_type or "").startswith("image/") and not m.caption:
-        await m.reply("Пришли текст, голосовое, фото или скриншот — файлы других типов я не читаю.")
+        await m.reply(t(lang, "doc_unsupported"))
         return
-    uid = m.from_user.id
-    register(uid)
-    await m.bot.send_chat_action(m.chat.id, "typing")
-    mode = (
-        "Пользователь переслал тебе сообщение из другого чата."
-        if m.forward_origin
-        else "Пользователь пишет тебе сам: это может быть новое дело, просьба изменить задачи или вопрос о расписании."
-    )
-    res = await analyze(m, mode, user_context(uid))
-    if res is None:
-        await m.reply("Не получилось разобрать, попробуй позже.")
+    if m.forward_origin and not (m.voice or m.photo or m.document):  # текстовые пересылки копим в пачку
+        batches.setdefault(uid, []).append(m)
+        if timer := batch_timers.get(uid):
+            timer.cancel()
+        batch_timers[uid] = asyncio.create_task(flush_batch(m.bot, m.chat.id, uid))
         return
-    acted = 0
-    for t in res.create:
-        acted += await create_pending(m.bot, uid, t, "", None)
-    for c in res.update:
-        acted += await propose_change(m.bot, uid, c.id, change_data(c))
-    if res.reply and not acted:  # при правках ответ ИИ не нужен — всё видно в карточках
-        await m.answer(res.reply)
-    elif not acted:
-        await m.reply("Не нашёл тут дел. Можно спросить: «что у меня завтра?» или «перенеси встречу на субботу».")
+    text, ref, parts = await message_input(m)
+    await respond(m.bot, m.chat.id, uid, text, ref, parts, FORWARD_MODE if m.forward_origin else DIRECT_MODE)
 
 
-def start_button(bot_username: str) -> list[InlineKeyboardButton]:
-    return [InlineKeyboardButton(text="🚀 Получать задачи в личку", url=f"https://t.me/{bot_username}?start=group")]
-
+# ── Группы ───────────────────────────────────────────────────────
 
 @dp.message(Command("start", "help"), GROUP)
 async def group_help(m: Message):
-    me = await m.bot.get_me()
-    await m.reply(
-        "Я замечаю в этом чате встречи, дедлайны и переносы и присылаю их в личку тем, кто запустил меня. "
-        "В чат я ничего не пишу.\n\n"
-        "🎙 Голосовые и фото сам не разбираю. Ответь на такое сообщение командой /task — "
-        "и я пришлю задачу тебе в личку. Так же можно с любым сообщением, которое я пропустил.",
-        reply_markup=keyboard(start_button(me.username)),
-    )
+    lang = texts.lang_from_code(m.from_user.language_code)
+    me = await m.bot.me()
+    await m.reply(t(lang, "group_help"), reply_markup=keyboard(start_button(lang, me.username)))
 
 
-@dp.message(Command("today", "tasks", "settings", "calendar"), GROUP)
+@dp.message(Command("today", "tasks", "plan", "week", "settings", "calendar"), GROUP)
 async def group_private_only(m: Message):
-    me = await m.bot.get_me()
-    await m.reply("Эта команда работает в личке — там твои задачи не видны другим.",
-                  reply_markup=keyboard(start_button(me.username)))
+    lang = texts.lang_from_code(m.from_user.language_code)
+    me = await m.bot.me()
+    await m.reply(t(lang, "private_only"), reply_markup=keyboard(start_button(lang, me.username)))
 
 
 @dp.message(Command("task"), GROUP)
 async def group_task(m: Message):
     """/task ответом на сообщение: явная просьба разобрать его (в т.ч. голосовое или фото). Задача — только автору команды."""
-    me = await m.bot.get_me()
     uid = m.from_user.id
+    lang = texts.lang_from_code(m.from_user.language_code)
+    me = await m.bot.me()
     if not (target := m.reply_to_message):
-        await m.reply("Ответь командой /task на сообщение, голосовое или фото — и я сделаю из него задачу.")
+        await m.reply(t(lang, "task_need_reply"))
         return
-    if not db.execute("SELECT 1 FROM users WHERE id = ?", (uid,)).fetchone():
-        await m.reply("Сначала нажми «Старт» у меня в личке — туда придёт задача.",
-                      reply_markup=keyboard(start_button(me.username)))
+    if not is_user(uid):
+        await m.reply(t(lang, "start_first"), reply_markup=keyboard(start_button(lang, me.username)))
         return
+    lang = lang_of(uid)
     mode = f"Пользователь попросил сделать задачу из сообщения в групповом чате «{m.chat.title or ''}»."
-    if (res := await analyze(target.as_(m.bot), mode, user_context(uid))) is None:
-        await m.reply("Не получилось разобрать, попробуй позже.")
+    text, ref, parts = await message_input(target.as_(m.bot))
+    if (res := await analyze(text, ref, parts, mode, user_context(uid), lang)) is None:
+        await m.reply(t(lang, "ai_failed"))
         return
     acted = 0
-    for t in res.create:
-        acted += await create_pending(m.bot, uid, t, m.chat.title or "", m.chat.id)
+    for nt in res.create:
+        acted += await create_pending(m.bot, uid, lang, nt, m.chat.title or "", m.chat.id)
     for c in res.update:
-        acted += await propose_change(m.bot, uid, c.id, change_data(c))
+        acted += await propose_change(m.bot, uid, lang, c.id, change_data(c))
     if acted:
         await m.react([ReactionTypeEmoji(emoji="👍")])  # тихо: карточка уже в личке
     else:
-        await m.reply("Не нашёл тут дела.")
+        await m.reply(t(lang, "nothing_here"))
 
 
 @dp.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=JOIN_TRANSITION), GROUP)
 async def added_to_group(event: ChatMemberUpdated):
     """Бота добавили в группу: объясняем, как он работает, и предупреждаем, если он не видит сообщений."""
+    lang = texts.lang_from_code(event.from_user.language_code)
     me = await event.bot.get_me()
-    text = (
-        "👋 Привет! Я замечаю в этом чате встречи, дедлайны и переносы и присылаю их в личку — "
-        "тем, кто запустил меня. Здесь я молчу и ничего не пишу.\n\n"
-        "Чтобы получать задачи из этого чата — нажмите кнопку ниже и «Старт»."
-    )
+    text = t(lang, "group_welcome")
     if not me.can_read_all_group_messages and event.new_chat_member.status != "administrator":
-        text += (
-            "\n\n⚠️ Сейчас я не вижу сообщений чата. Сделайте меня администратором "
-            "или отключите режим приватности в @BotFather (/setprivacy → Disable) и добавьте меня заново."
-        )
-    await event.answer(text + "\n\n🎙 Голосовое или фото — ответьте на него командой /task.",
-                       reply_markup=keyboard(start_button(me.username)))
+        text += "\n\n" + t(lang, "group_privacy")
+    await event.answer(text + "\n\n" + t(lang, "group_voice"), reply_markup=keyboard(start_button(lang, me.username)))
 
 
 @dp.message(GROUP, F.text | F.caption)
@@ -808,7 +1058,8 @@ async def group(m: Message):
     if not HINT.search(m.text or m.caption):
         return
     mode = f"Сообщение из группового чата «{m.chat.title or ''}». В списке — дела, уже найденные в этом чате."
-    if not (res := await analyze(m, mode, group_context(m.chat.id))):
+    text, ref, _ = await message_input(m)
+    if not (res := await analyze(text, ref, [], mode, group_context(m.chat.id), "ru")):
         return
     if res.create:
         # ponytail: перебор всех пользователей бота с проверкой членства — O(users) запросов; при росте хранить связку чат↔пользователь.
@@ -816,8 +1067,8 @@ async def group(m: Message):
             try:
                 if (await m.bot.get_chat_member(m.chat.id, uid)).status in ("left", "kicked"):
                     continue
-                for t in res.create:
-                    await create_pending(m.bot, uid, t, m.chat.title or "", m.chat.id)
+                for nt in res.create:
+                    await create_pending(m.bot, uid, lang_of(uid), nt, m.chat.title or "", m.chat.id)
             except TelegramAPIError as e:  # пользователь не в чате или заблокировал бота
                 logging.info("skip %s: %s", uid, e)
     for c in res.update:  # перенос/отмена — каждому, у кого есть копия этой задачи
@@ -827,9 +1078,67 @@ async def group(m: Message):
             "SELECT id, user_id FROM tasks WHERE chat_id = ? AND title = ? AND start = ?", (m.chat.id, *rep)
         ).fetchall():
             try:
-                await propose_change(m.bot, uid, task_id, change_data(c))
+                await propose_change(m.bot, uid, lang_of(uid), task_id, change_data(c))
             except TelegramAPIError as e:
                 logging.info("skip %s: %s", uid, e)
+
+
+# ── Встроенный режим: поделиться задачей в любом чате ────────────
+
+@dp.inline_query()
+async def inline(q: InlineQuery):
+    uid = q.from_user.id
+    lang = lang_of(uid) if is_user(uid) else texts.lang_from_code(q.from_user.language_code)
+    query = q.query.strip()
+    rows = db.execute(
+        "SELECT id FROM tasks WHERE user_id = ? AND status = 'ok' AND start >= ? AND (? = '' OR py_lower(title) LIKE ? ESCAPE '\\'"
+        " OR py_lower(location) LIKE ? ESCAPE '\\' OR py_lower(description) LIKE ? ESCAPE '\\') ORDER BY start LIMIT 20",
+        (uid, f"{datetime.now(TZ):%Y-%m-%d}", query, like(query), like(query), like(query)),
+    ).fetchall()
+    me = await q.bot.me()
+    results = []
+    for (task_id,) in rows:
+        task = task_dict(task_id) | {"source": ""}
+        results.append(InlineQueryResultArticle(
+            id=str(task_id),
+            title=f"{CATEGORY_ICONS.get(task['category'], '📌')} {task['title']}",
+            description=human(lang, task["start"]) + (f" · {task['location']}" if task["location"] else ""),
+            input_message_content=InputTextMessageContent(message_text=card(lang, task), parse_mode="HTML"),
+            reply_markup=keyboard(
+                [InlineKeyboardButton(text=t(lang, "inline_add"), callback_data=f"sh:{task_id}:{sign(f'share:{task_id}', 12)}")],
+                [InlineKeyboardButton(text=t(lang, "inline_open"), url=f"https://t.me/{me.username}")],
+            ),
+        ))
+    await q.answer(results, cache_time=0, is_personal=True,
+                   button=None if results else InlineQueryResultsButton(text=t(lang, "inline_empty"), start_parameter="inline"))
+
+
+@dp.callback_query(F.data.regexp(r"^sh:\d+:[0-9a-f]{12}$"))
+async def share_add(c: CallbackQuery):
+    """Собеседник нажал «Добавить себе» под карточкой из встроенного режима."""
+    _, task_id, sig = c.data.split(":")
+    uid = c.from_user.id
+    lang = lang_of(uid) if is_user(uid) else texts.lang_from_code(c.from_user.language_code)
+    if not hmac.compare_digest(sig, sign(f"share:{task_id}", 12)):
+        await c.answer()
+        return
+    if not (task := task_dict(int(task_id))):
+        await c.answer(t(lang, "inline_gone"), show_alert=True)
+        return
+    if not is_user(uid):
+        await c.answer(t(lang, "inline_start"), show_alert=True)
+        return
+    if db.execute("SELECT 1 FROM tasks WHERE user_id = ? AND title = ? AND start = ?", (uid, task["title"], task["start"])).fetchone():
+        await c.answer(t(lang, "inline_already"), show_alert=True)
+        return
+    db.execute(
+        "INSERT INTO tasks (user_id, title, start, location, description, category, priority, subtasks, reminders, status,"
+        " origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, (SELECT reminders FROM users WHERE id = ?), 'ok', 'shared')",
+        (uid, task["title"], task["start"], task["location"], task["description"], task["category"], task["priority"],
+         fresh_subtasks(task["subtasks"]), uid),
+    )
+    db.commit()
+    await c.answer(t(lang, "inline_added"), show_alert=True)
 
 
 # ── Кнопки ───────────────────────────────────────────────────────
@@ -837,12 +1146,10 @@ async def group(m: Message):
 @dp.callback_query(F.data.regexp(r"^(ok|no):\d+$"))
 async def decide(c: CallbackQuery):
     action, task_id = c.data.split(":")
-    uid = c.from_user.id
-    row = db.execute(
-        "SELECT start FROM tasks WHERE id = ? AND user_id = ? AND status = 'pending'", (task_id, uid)
-    ).fetchone()
-    if not row:
-        await c.answer("Уже обработано")
+    uid, task_id = c.from_user.id, int(task_id)
+    lang = lang_of(uid)
+    if not db.execute("SELECT 1 FROM tasks WHERE id = ? AND user_id = ? AND status = 'pending'", (task_id, uid)).fetchone():
+        await c.answer(t(lang, "handled"))
         return
     if action == "no":
         db.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
@@ -852,17 +1159,16 @@ async def decide(c: CallbackQuery):
         return
     db.execute("UPDATE tasks SET status = 'ok' WHERE id = ?", (task_id,))
     db.commit()
-    start_series(int(task_id))
-    title, start, location, description = db.execute(
-        "SELECT title, start, location, description FROM tasks WHERE id = ?", (task_id,)
-    ).fetchone()
-    await c.answer("Сохранено")
+    start_series(task_id)
+    task = task_dict(task_id)
+    await c.answer(t(lang, "saved"))
     await c.message.edit_text(
-        "✅ " + task_text(int(task_id), uid),
+        "✅ " + task_text(lang, uid, task_id),
         parse_mode="HTML",
         reply_markup=keyboard(
-            app_button("✏️ Изменить и настроить напоминания", task=task_id, date=start[:10]),
-            [InlineKeyboardButton(text="📅 В Google Календарь", url=gcal_link(title, start, location, description))],
+            app_button(lang, "btn_edit", task=task_id, date=task["start"][:10]),
+            [InlineKeyboardButton(text=t(lang, "btn_gcal"),
+                                  url=gcal_link(task["title"], task["start"], task["location"], task["description"]))],
         ),
     )
 
@@ -871,50 +1177,60 @@ async def decide(c: CallbackQuery):
 async def change_action(c: CallbackQuery):
     _, action, change_id = c.data.split(":")
     uid = c.from_user.id
+    lang = lang_of(uid)
     row = db.execute("SELECT task_id, fields FROM changes WHERE id = ? AND user_id = ?", (change_id, uid)).fetchone()
     db.execute("DELETE FROM changes WHERE id = ? AND user_id = ?", (change_id, uid))
     db.commit()
-    task_id, data = row if row else (None, {})
+    task_id, data = row if row else (None, "{}")
+    data = json.loads(data)
+    if "plan" in data:  # план дня
+        if action == "no":
+            await c.answer(t(lang, "kept"))
+            await c.message.delete()
+            return
+        apply_plan(uid, data["plan"])
+        await c.answer(t(lang, "plan_applied"))
+        await c.message.edit_text(c.message.html_text + "\n\n" + t(lang, "plan_applied"), parse_mode="HTML",
+                                  reply_markup=keyboard(app_button(lang)))
+        return
     exists = task_id and db.execute("SELECT title FROM tasks WHERE id = ? AND user_id = ?", (task_id, uid)).fetchone()
     if not exists:
-        await c.answer("Уже неактуально")
+        await c.answer(t(lang, "not_actual"))
         await c.message.edit_reply_markup(reply_markup=None)
         return
     if action == "no":
-        await c.answer("Оставил как было")
+        await c.answer(t(lang, "kept"))
         await c.message.delete()
         return
-    data = json.loads(data)
     if data.get("delete"):
         db.execute("DELETE FROM tasks WHERE id = ? AND user_id = ?", (task_id, uid))
         db.commit()
-        await c.answer("Удалено")
-        await c.message.edit_text(f"🗑 Удалено: <b>{escape(exists[0])}</b>", parse_mode="HTML")
+        await c.answer(t(lang, "applied"))
+        await c.message.edit_text(t(lang, "deleted", title=escape(exists[0])), parse_mode="HTML")
         return
     update_task(task_id, uid, data)
-    await c.answer("Готово")
-    await c.message.edit_text("✅ <b>Обновлено</b>\n\n" + task_text(task_id, uid), parse_mode="HTML")
+    await c.answer(t(lang, "applied"))
+    await c.message.edit_text(t(lang, "updated") + "\n\n" + task_text(lang, uid, task_id), parse_mode="HTML")
 
 
 @dp.callback_query(F.data.regexp(r"^(sz:(15|60)|dn):\d+$"))
 async def reminder_action(c: CallbackQuery):
     *action, task_id = c.data.split(":")
-    row = db.execute(
-        "SELECT title, start, location FROM tasks WHERE id = ? AND user_id = ?", (task_id, c.from_user.id)
-    ).fetchone()
-    if not row:
-        await c.answer("Задача удалена")
+    uid, task_id = c.from_user.id, int(task_id)
+    lang = lang_of(uid)
+    if not db.execute("SELECT 1 FROM tasks WHERE id = ? AND user_id = ?", (task_id, uid)).fetchone():
+        await c.answer(t(lang, "task_gone"))
         return
     if action[0] == "dn":
         db.execute("UPDATE tasks SET done = 1 WHERE id = ?", (task_id,))
         db.commit()
-        await c.answer("Отлично!")
-        await c.message.edit_text("✅ <b>Сделано</b>\n\n" + card(*row), parse_mode="HTML")
+        await c.answer(t(lang, "great"))
+        await c.message.edit_text(t(lang, "done_header") + "\n\n" + card(lang, task_dict(task_id)), parse_mode="HTML")
         return
     at = datetime.now(TZ) + timedelta(minutes=int(action[1]))
     db.execute("UPDATE tasks SET snooze = ? WHERE id = ?", (f"{at:%Y-%m-%dT%H:%M}", task_id))
     db.commit()
-    await c.answer(f"Напомню в {at:%H:%M}")
+    await c.answer(t(lang, "remind_at", time=f"{at:%H:%M}"))
     await c.message.edit_reply_markup(reply_markup=None)
 
 
@@ -922,6 +1238,7 @@ async def reminder_action(c: CallbackQuery):
 async def evening_action(c: CallbackQuery):
     _, action, day = c.data.split(":")
     uid = c.from_user.id
+    lang = lang_of(uid)
     rows = db.execute(
         "SELECT id, start FROM tasks WHERE user_id = ? AND status = 'ok' AND done = 0 AND substr(start, 1, 10) = ?",
         (uid, day),
@@ -932,23 +1249,27 @@ async def evening_action(c: CallbackQuery):
         else:
             update_task(task_id, uid, {"start": fmt_like(datetime.fromisoformat(start) + timedelta(days=1), start),
                                        "sent": "", "snooze": None})
-    n = len(rows)
-    text = (f"📅 Перенёс на завтра: {n} {plural(n, 'дело', 'дела', 'дел')}" if action == "mv"
-            else f"✅ Отметил выполненными: {n} {plural(n, 'дело', 'дела', 'дел')}")
     await c.answer()
-    await c.message.edit_text(text, reply_markup=keyboard(app_button()))
+    await c.message.edit_text(t(lang, "moved" if action == "mv" else "marked", items=texts.word(lang, "item", len(rows))),
+                              reply_markup=keyboard(app_button(lang)))
+
+
+@dp.callback_query(F.data.regexp(r"^pl:\d{4}-\d{2}-\d{2}$"))
+async def plan_action(c: CallbackQuery):
+    await c.answer()
+    await send_plan(c.bot, c.message.chat.id, c.from_user.id, c.data[3:])
 
 
 # ── Планировщик ──────────────────────────────────────────────────
 
-async def notify(bot: Bot, uid: int, task_id: int, title: str, start: str, location: str, header: str) -> None:
+async def notify(bot: Bot, uid: int, task_id: int, header: str) -> None:
+    lang = lang_of(uid)
     kb = keyboard([
-        *[InlineKeyboardButton(text=f"⏰ +{m} мин" if m < 60 else f"⏰ +{m // 60} ч", callback_data=f"sz:{m}:{task_id}")
-          for m in SNOOZE_MINUTES],
-        InlineKeyboardButton(text="✅ Сделано", callback_data=f"dn:{task_id}"),
+        *[InlineKeyboardButton(text=texts.snooze_label(lang, m), callback_data=f"sz:{m}:{task_id}") for m in SNOOZE_MINUTES],
+        InlineKeyboardButton(text=t(lang, "btn_done"), callback_data=f"dn:{task_id}"),
     ])
     try:
-        await bot.send_message(uid, f"⏰ <b>{header}</b>\n\n" + card(title, start, location), parse_mode="HTML", reply_markup=kb)
+        await bot.send_message(uid, f"⏰ <b>{header}</b>\n\n" + card(lang, task_dict(task_id)), parse_mode="HTML", reply_markup=kb)
     except TelegramAPIError as e:
         logging.info("reminder %s: %s", uid, e)
 
@@ -956,30 +1277,30 @@ async def notify(bot: Bot, uid: int, task_id: int, title: str, start: str, locat
 async def send_reminders(bot: Bot, now: datetime) -> None:
     # ponytail: каждую минуту перебираем задачи на месяц вперёд в Python; при росте — таблица напоминаний с индексом по времени.
     rows = db.execute(
-        "SELECT id, user_id, title, start, location, reminders, sent FROM tasks"
+        "SELECT id, user_id, start, reminders, sent FROM tasks"
         " WHERE status = 'ok' AND done = 0 AND reminders != '' AND start BETWEEN ? AND ?",
         (f"{now - timedelta(days=1):%Y-%m-%d}", f"{now + timedelta(days=31):%Y-%m-%d}"),
     ).fetchall()
-    for task_id, uid, title, start, location, reminders, sent in rows:
+    for task_id, uid, start, reminders, sent in rows:
         sent_set = set(parse_offsets(sent))
         if not (due := due_offsets(start, parse_offsets(reminders), sent_set, now)):
             continue
         # Несколько просроченных сразу (бот был выключен) — одно сообщение, а не пачка.
         db.execute("UPDATE tasks SET sent = ? WHERE id = ?", (",".join(map(str, sent_set | set(due))), task_id))
         db.commit()
-        header = time_left(event_time(start) - now) if "T" in start else "Напоминание"
-        await notify(bot, uid, task_id, title, start, location, header)
+        lang = lang_of(uid)
+        mins = round((event_time(start) - now).total_seconds() / 60)
+        await notify(bot, uid, task_id, texts.time_left(lang, mins) if "T" in start else t(lang, "reminder"))
 
 
 async def send_snoozed(bot: Bot, now: datetime) -> None:
     rows = db.execute(
-        "SELECT id, user_id, title, start, location FROM tasks WHERE snooze <= ? AND done = 0",
-        (f"{now:%Y-%m-%dT%H:%M}",),
+        "SELECT id, user_id FROM tasks WHERE snooze <= ? AND done = 0", (f"{now:%Y-%m-%dT%H:%M}",)
     ).fetchall()
-    for task_id, uid, title, start, location in rows:
+    for task_id, uid in rows:
         db.execute("UPDATE tasks SET snooze = NULL WHERE id = ?", (task_id,))
         db.commit()
-        await notify(bot, uid, task_id, title, start, location, "Напоминаю ещё раз")
+        await notify(bot, uid, task_id, t(lang_of(uid), "remind_again"))
 
 
 def due_users(hour_column: str, sent_column: str, now: datetime) -> list[int]:
@@ -1002,14 +1323,20 @@ def day_tasks(uid: int, day: str) -> list[tuple[str, str]]:
 
 
 async def send_digests(bot: Bot, now: datetime) -> None:
+    day = f"{now:%Y-%m-%d}"
     for uid in due_users("digest_hour", "digest_sent", now):
-        if not (rows := day_tasks(uid, f"{now:%Y-%m-%d}")):
+        if not (rows := day_tasks(uid, day)):
             continue
-        lines = [f"• {start[11:16] or 'весь день'} — {escape(title)}" for title, start in rows]
+        lang = lang_of(uid)
+        lines = [f"• {start[11:16] or t(lang, 'all_day')} — {escape(title)}" for title, start in rows]
+        untimed = any("T" not in start for _, start in rows)
         try:
             await bot.send_message(
-                uid, "☀️ <b>Доброе утро! План на сегодня:</b>\n\n" + "\n".join(lines),
-                parse_mode="HTML", reply_markup=keyboard(app_button()),
+                uid, t(lang, "digest") + "\n\n" + "\n".join(lines), parse_mode="HTML",
+                reply_markup=keyboard(
+                    [InlineKeyboardButton(text=t(lang, "btn_plan"), callback_data=f"pl:{day}")] if untimed else [],
+                    app_button(lang),
+                ),
             )
         except TelegramAPIError as e:
             logging.info("digest %s: %s", uid, e)
@@ -1020,21 +1347,40 @@ async def send_evenings(bot: Bot, now: datetime) -> None:
     for uid in due_users("evening_hour", "evening_sent", now):
         if not (rows := day_tasks(uid, day)):
             continue
-        n = len(rows)
-        lines = [f"• {start[11:16] or 'весь день'} — {escape(title)}" for title, start in rows]
+        lang = lang_of(uid)
+        lines = [f"• {start[11:16] or t(lang, 'all_day')} — {escape(title)}" for title, start in rows]
         try:
             await bot.send_message(
                 uid,
-                f"🌙 <b>Сегодня не отмечено {n} {plural(n, 'дело', 'дела', 'дел')}:</b>\n\n" + "\n".join(lines),
+                t(lang, "evening", items=texts.word(lang, "item", len(rows))) + "\n\n" + "\n".join(lines),
                 parse_mode="HTML",
                 reply_markup=keyboard(
-                    [InlineKeyboardButton(text="📅 Всё на завтра", callback_data=f"ev:mv:{day}"),
-                     InlineKeyboardButton(text="✅ Всё сделано", callback_data=f"ev:dn:{day}")],
-                    app_button("🗓 Разобрать в календаре", date=day),
+                    [InlineKeyboardButton(text=t(lang, "btn_all_tomorrow"), callback_data=f"ev:mv:{day}"),
+                     InlineKeyboardButton(text=t(lang, "btn_all_done"), callback_data=f"ev:dn:{day}")],
+                    app_button(lang, "btn_review", date=day),
                 ),
             )
         except TelegramAPIError as e:
             logging.info("evening %s: %s", uid, e)
+
+
+async def send_weekly(bot: Bot, now: datetime) -> None:
+    """Воскресенье, WEEKLY_HOUR: итоги недели — тем, у кого включены вечерние сводки."""
+    if now.weekday() != 6 or now.hour != WEEKLY_HOUR:
+        return
+    day = f"{now:%Y-%m-%d}"
+    uids = [uid for (uid,) in db.execute(
+        "SELECT id FROM users WHERE evening_hour IS NOT NULL AND weekly_sent IS NOT ?", (day,)
+    )]
+    db.executemany("UPDATE users SET weekly_sent = ? WHERE id = ?", [(day, uid) for uid in uids])
+    db.commit()
+    for uid in uids:
+        lang = lang_of(uid)
+        try:
+            await bot.send_message(uid, await week_text(uid, lang, now.date()), parse_mode="HTML",
+                                   reply_markup=keyboard(app_button(lang)))
+        except TelegramAPIError as e:
+            logging.info("weekly %s: %s", uid, e)
 
 
 def extend_all_series(now: datetime) -> None:
@@ -1054,6 +1400,7 @@ async def scheduler(bot: Bot) -> None:
             await send_snoozed(bot, now)
             await send_digests(bot, now)
             await send_evenings(bot, now)
+            await send_weekly(bot, now)
             extend_all_series(now)
         except Exception:
             logging.exception("scheduler")
@@ -1071,11 +1418,11 @@ def feed_uid(request: web.Request) -> int:
 
 
 async def feed(request: web.Request) -> web.Response:
+    uid = feed_uid(request)
     rows = db.execute(
-        "SELECT id, title, start, location, description FROM tasks WHERE user_id = ? AND status = 'ok'",
-        (feed_uid(request),),
+        "SELECT id, title, start, location, description FROM tasks WHERE user_id = ? AND status = 'ok'", (uid,)
     ).fetchall()
-    return web.Response(text=ics(rows), content_type="text/calendar", charset="utf-8")
+    return web.Response(text=ics(rows, t(lang_of(uid), "cal_name")), content_type="text/calendar", charset="utf-8")
 
 
 async def subscribe(request: web.Request) -> web.Response:
@@ -1085,12 +1432,13 @@ async def subscribe(request: web.Request) -> web.Response:
 
 def webapp_user(request: web.Request) -> int:
     try:
-        user = safe_parse_webapp_init_data(os.environ["BOT_TOKEN"], request.headers.get("Authorization", "")).user
+        data = safe_parse_webapp_init_data(os.environ["BOT_TOKEN"], request.headers.get("Authorization", ""))
     except ValueError:
-        user = None
-    if not user:
+        data = None
+    if not data or not data.user:
         raise web.HTTPUnauthorized()
-    return user.id
+    register(data.user.id, data.user.language_code)
+    return data.user.id
 
 
 async def json_body(request: web.Request) -> dict:
@@ -1109,27 +1457,47 @@ def fields_or_400(data: dict) -> dict:
     return fields
 
 
+API_COLUMNS = ("id", "title", "start", "location", "description", "source", "status", "done", "repeat", "series",
+               "category", "priority", "origin", "subtasks", "reminders")
+
+
+def api_rows(where: str, params: tuple) -> list[dict]:
+    rows = db.execute(f"SELECT {', '.join(API_COLUMNS)} FROM tasks WHERE {where}", params).fetchall()
+    return [dict(zip(API_COLUMNS, r)) | {"subtasks": json.loads(r[13] or "[]"), "reminders": parse_offsets(r[14])}
+            for r in rows]
+
+
 async def api_tasks(request: web.Request) -> web.Response:
-    """Подтверждённые задачи за период [from, to) и все неподтверждённые."""
+    """Подтверждённые задачи за период [from, to), все неподтверждённые, настройки и статистика недели."""
     uid = webapp_user(request)
-    register(uid)
-    start_from = normalize(request.query.get("from", "")) or f"{datetime.now(TZ):%Y-%m-%d}"
+    today = datetime.now(TZ).date()
+    start_from = normalize(request.query.get("from", "")) or f"{today}"
     start_to = normalize(request.query.get("to", "")) or "9999"
-    rows = db.execute(
-        "SELECT id, title, start, location, description, source, status, done, repeat, series, reminders FROM tasks"
-        " WHERE user_id = ? AND (status = 'pending' OR (start >= ? AND start < ?)) ORDER BY start",
-        (uid, start_from, start_to),
-    ).fetchall()
-    keys = ("id", "title", "start", "location", "description", "source", "status", "done", "repeat", "series")
-    reminders, smart, digest, evening = db.execute(
-        "SELECT reminders, smart_reminders, digest_hour, evening_hour FROM users WHERE id = ?", (uid,)
+    reminders, smart, digest, evening, lang = db.execute(
+        "SELECT reminders, smart_reminders, digest_hour, evening_hour, lang FROM users WHERE id = ?", (uid,)
     ).fetchone()
     return web.json_response({
-        "tasks": [dict(zip(keys, r)) | {"reminders": parse_offsets(r[10])} for r in rows],
-        "settings": {"reminders": parse_offsets(reminders), "smart_reminders": bool(smart),
-                     "digest_hour": digest, "evening_hour": evening},
+        "tasks": api_rows("user_id = ? AND (status = 'pending' OR (start >= ? AND start < ?)) ORDER BY start",
+                          (uid, start_from, start_to)),
+        "settings": {"reminders": parse_offsets(reminders), "smart_reminders": bool(smart), "digest_hour": digest,
+                     "evening_hour": evening, "lang": lang if lang in LANGS else "ru"},
+        "week": week_stats(uid, today - timedelta(days=today.weekday())),
         "calendar": cal_links(uid),
     })
+
+
+async def api_search(request: web.Request) -> web.Response:
+    uid = webapp_user(request)
+    q = request.query.get("q", "").strip()[:100]
+    if len(q) < 2:
+        return web.json_response({"tasks": []})
+    pattern = like(q)
+    return web.json_response({"tasks": api_rows(
+        "user_id = ? AND (py_lower(title) LIKE ? ESCAPE '\\' OR py_lower(description) LIKE ? ESCAPE '\\'"
+        " OR py_lower(location) LIKE ? ESCAPE '\\' OR py_lower(subtasks) LIKE ? ESCAPE '\\')"
+        " ORDER BY start >= ? DESC, start LIMIT 50",
+        (uid, pattern, pattern, pattern, pattern, f"{datetime.now(TZ):%Y-%m-%d}"),
+    )})
 
 
 async def api_create(request: web.Request) -> web.Response:
@@ -1137,12 +1505,11 @@ async def api_create(request: web.Request) -> web.Response:
     fields = fields_or_400(await json_body(request))
     if "title" not in fields or "start" not in fields:
         raise web.HTTPBadRequest()
-    register(uid)
     fields.setdefault("reminders", db.execute("SELECT reminders FROM users WHERE id = ?", (uid,)).fetchone()[0])
     fields |= {"status": "ok"}
     assert set(fields) <= TASK_COLUMNS
     task_id = db.execute(
-        f"INSERT INTO tasks (user_id, {', '.join(fields)}) VALUES (?, {', '.join('?' * len(fields))})",
+        f"INSERT INTO tasks (user_id, origin, {', '.join(fields)}) VALUES (?, 'manual', {', '.join('?' * len(fields))})",
         (uid, *fields.values()),
     ).lastrowid
     db.commit()
@@ -1159,13 +1526,9 @@ async def api_update(request: web.Request) -> web.Response:
         raise web.HTTPNotFound()
     start, series = row
     if data.get("delete") == "series" and series:  # эта и все следующие
-        db.execute("DELETE FROM tasks WHERE series = ? AND user_id = ? AND start >= ?", (series, uid, start))
-        db.commit()
-        return web.json_response({"ok": True})
+        return web.json_response({"undo": trash_tasks(uid, "series = ? AND start >= ?", (series, start))})
     if data.get("delete"):
-        db.execute("DELETE FROM tasks WHERE id = ? AND user_id = ?", (task_id, uid))
-        db.commit()
-        return web.json_response({"ok": True})
+        return web.json_response({"undo": trash_tasks(uid, "id = ?", (task_id,))})
     fields = fields_or_400(data)
     if data.get("confirm"):
         fields["status"] = "ok"
@@ -1179,6 +1542,29 @@ async def api_update(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+async def api_undo(request: web.Request) -> web.Response:
+    uid = webapp_user(request)
+    return web.json_response({"restored": restore_tasks(uid, str((await json_body(request)).get("batch", "")))})
+
+
+async def api_plan(request: web.Request) -> web.Response:
+    uid = webapp_user(request)
+    if not (day := normalize(str((await json_body(request)).get("date", "")))) or "T" in day:
+        raise web.HTTPBadRequest()
+    if (result := await make_plan(uid, day, lang_of(uid))) is None:
+        raise web.HTTPServiceUnavailable()
+    return web.json_response({"items": result[0], "comment": result[1]})
+
+
+async def api_plan_apply(request: web.Request) -> web.Response:
+    uid = webapp_user(request)
+    items = (await json_body(request)).get("items")
+    if not isinstance(items, list):
+        raise web.HTTPBadRequest()
+    plan = [[i.get("id"), i.get("start")] for i in items if isinstance(i, dict) and type(i.get("id")) is int]
+    return web.json_response({"applied": apply_plan(uid, plan)})
+
+
 async def api_settings(request: web.Request) -> web.Response:
     uid = webapp_user(request)
     data = await json_body(request)
@@ -1189,16 +1575,21 @@ async def api_settings(request: web.Request) -> web.Response:
         fields["reminders"] = reminders
     if "smart_reminders" in data:
         fields["smart_reminders"] = int(bool(data["smart_reminders"]))
+    if "lang" in data:
+        if data["lang"] not in LANGS:
+            raise web.HTTPBadRequest()
+        fields["lang"] = data["lang"]
     for key in ("digest_hour", "evening_hour"):
         if key in data:
             hour = data[key]
             if hour is not None and not (type(hour) is int and 0 <= hour <= 23):
                 raise web.HTTPBadRequest()
             fields[key] = hour
-    register(uid)
     if fields:  # ключи только из списка выше
         db.execute(f"UPDATE users SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = ?", (*fields.values(), uid))
         db.commit()
+    if "lang" in fields:
+        await set_menu(BOT, uid, fields["lang"])
     return web.json_response({"ok": True})
 
 
@@ -1211,8 +1602,12 @@ def make_app() -> web.Application:
     app.add_routes([
         web.get("/", index),
         web.get("/api/tasks", api_tasks),
+        web.get("/api/search", api_search),
         web.post("/api/tasks", api_create),
         web.post(r"/api/tasks/{id:\d+}", api_update),
+        web.post("/api/undo", api_undo),
+        web.post("/api/plan", api_plan),
+        web.post("/api/plan/apply", api_plan_apply),
         web.post("/api/settings", api_settings),
         web.get("/cal/{name}", feed),
         web.get("/subscribe/cal/{name}", subscribe),
@@ -1220,18 +1615,30 @@ def make_app() -> web.Application:
     return app
 
 
+async def setup_profile(bot: Bot) -> None:
+    """Команды, описание и кнопка меню на всех языках (русский — по умолчанию)."""
+    for lang in LANGS:
+        code = None if lang == "ru" else lang
+        await bot.set_my_commands([BotCommand(command=c, description=t(lang, f"cmd_{c}"))
+                                   for c in ("today", "tasks", "plan", "week", "settings", "calendar", "help")],
+                                  language_code=code)
+        await bot.set_my_commands([BotCommand(command="task", description=t(lang, "cmd_task")),
+                                   BotCommand(command="help", description=t(lang, "cmd_group_help"))],
+                                  scope=BotCommandScopeAllGroupChats(), language_code=code)
+        await bot.set_my_description(t(lang, "desc"), language_code=code)
+        await bot.set_my_short_description(t(lang, "short_desc"), language_code=code)
+    if PUBLIC_URL:
+        await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="Календарь", web_app=WebAppInfo(url=PUBLIC_URL)))
+
+
 async def main():
+    global BOT
     logging.basicConfig(level=logging.INFO)
-    bot = Bot(os.environ["BOT_TOKEN"])
+    bot = BOT = Bot(os.environ["BOT_TOKEN"])
     runner = web.AppRunner(make_app())
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
-    await bot.set_my_commands(COMMANDS)
-    await bot.set_my_commands(GROUP_COMMANDS, scope=BotCommandScopeAllGroupChats())
-    await bot.set_my_description(DESCRIPTION)
-    await bot.set_my_short_description(SHORT_DESCRIPTION)
-    if PUBLIC_URL:
-        await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="Календарь", web_app=WebAppInfo(url=PUBLIC_URL)))
+    await setup_profile(bot)
     reminders = asyncio.create_task(scheduler(bot))  # noqa: F841 — держим ссылку, чтобы задачу не собрал GC
     await dp.start_polling(bot)
 

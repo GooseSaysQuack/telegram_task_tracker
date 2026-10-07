@@ -3,45 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Задачи</title>
+<title>Task Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root {
-    --bg: #f3f3fa;
-    --surface: #ffffff;
-    --surface-2: #f4f3fd;
-    --text: #17162e;
-    --muted: #7b7a99;
-    --line: #e9e8f4;
-    --accent: #6c5ce7;
-    --accent-soft: #efedff;
-    --on-accent: #ffffff;
-    --danger: #e5484d;
-    --danger-soft: #fdeeee;
-    --hero-from: #5b4bdb;
-    --hero-to: #9a7bff;
-    --shadow: 0 8px 28px rgba(52, 40, 160, .08);
-    --r-xl: 28px;
-    --r-lg: 20px;
-    --r-md: 14px;
+    --bg: #f3f3fa; --surface: #ffffff; --surface-2: #f4f3fd; --text: #17162e; --muted: #7b7a99; --line: #e9e8f4;
+    --accent: #6c5ce7; --accent-soft: #efedff; --on-accent: #ffffff; --danger: #e5484d; --danger-soft: #fdeeee;
+    --hero-from: #5b4bdb; --hero-to: #9a7bff; --shadow: 0 8px 28px rgba(52, 40, 160, .08);
+    --c-work: #3b6cf6; --c-personal: #10a37f; --c-shopping: #e08a00; --c-health: #e5484d; --c-study: #8b5cf6; --c-other: #868e96;
+    --r-xl: 28px; --r-lg: 20px; --r-md: 14px;
   }
   [data-theme=dark] {
-    --bg: #0e0d1a;
-    --surface: #191829;
-    --surface-2: #222138;
-    --text: #f2f1fb;
-    --muted: #8e8cad;
-    --line: #2b2a45;
-    --accent: #8f80ff;
-    --accent-soft: #2a2654;
-    --danger: #ff6b6f;
-    --danger-soft: #3a1d26;
-    --hero-from: #3e30b8;
-    --hero-to: #6d55e8;
-    --shadow: none;
+    --bg: #0e0d1a; --surface: #191829; --surface-2: #222138; --text: #f2f1fb; --muted: #8e8cad; --line: #2b2a45;
+    --accent: #8f80ff; --accent-soft: #2a2654; --danger: #ff6b6f; --danger-soft: #3a1d26;
+    --hero-from: #3e30b8; --hero-to: #6d55e8; --shadow: none;
+    --c-work: #6b8cff; --c-personal: #3ccf9f; --c-shopping: #ffb23f; --c-health: #ff6b6f; --c-study: #a98bff; --c-other: #a0a6ad;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   [hidden] { display: none !important; }
@@ -52,10 +31,10 @@
   button { cursor: pointer; border: 0; background: none; padding: 0; }
   svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 
-  /* ── Шапка с календарём ─────────────────────────── */
+  /* ── Шапка с календарём ── */
   .hero { padding: 14px 16px 18px; border-radius: 0 0 var(--r-xl) var(--r-xl); color: #fff;
           background: linear-gradient(150deg, var(--hero-from), var(--hero-to)); }
-  .hero-top, .hero-month { display: flex; align-items: center; justify-content: space-between; }
+  .hero-top, .hero-month { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .eyebrow { font-size: 13px; font-weight: 600; opacity: .75; }
   .hero-month { margin: 6px 0 14px; }
   .hero-month h1 { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
@@ -67,8 +46,7 @@
   .weekdays, .grid { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; }
   .weekdays { margin-bottom: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; opacity: .6; }
   .grid { row-gap: 2px; touch-action: pan-y; }
-  .cell { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
-          height: 50px; color: #fff; }
+  .cell { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 50px; color: #fff; }
   .cell .num { display: grid; place-items: center; width: 36px; height: 36px; margin-bottom: 6px; border-radius: 12px;
                font-size: 15px; font-weight: 700; transition: background .15s, color .15s; }
   .cell.weekend .num { opacity: .75; }
@@ -79,138 +57,213 @@
   .dots i { width: 4px; height: 4px; border-radius: 50%; background: #fff; }
   .dots i.done { opacity: .4; }
 
-  /* ── Контент ─────────────────────────────────────── */
   main { padding: 0 16px; }
-  .sec-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 22px 2px 12px; }
+  .sec-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 22px 2px 12px; }
+  .sec-head > div:first-child { flex: 1 1 210px; min-width: 0; }
   .sec-head h2 { margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -.01em; }
   .sec-head p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+  .head-actions { display: flex; gap: 6px; flex: none; }
   .badge { min-width: 24px; padding: 2px 8px; border-radius: 999px; background: var(--accent); color: var(--on-accent);
            font-size: 12px; font-weight: 800; text-align: center; }
-  .add-btn { display: flex; align-items: center; gap: 6px; padding: 9px 14px; border-radius: 12px;
-             background: var(--accent-soft); color: var(--accent); font-weight: 700; }
-  .add-btn svg { width: 16px; height: 16px; stroke-width: 2.5; }
+  .soft-btn { display: flex; align-items: center; gap: 6px; padding: 9px 12px; border-radius: 12px; background: var(--accent-soft);
+              color: var(--accent); font-weight: 700; white-space: nowrap; }
+  .soft-btn svg { width: 16px; height: 16px; stroke-width: 2.5; }
   .stack { display: grid; gap: 10px; }
 
-  /* Карточка задачи */
+  /* ── Неделя ── */
+  .week { margin-top: 16px; padding: 14px 16px; border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow); }
+  .week-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .week-top b { font-size: 15px; font-weight: 800; }
+  .week-top span { font-size: 13px; color: var(--muted); }
+  .bar { height: 8px; margin: 10px 0; overflow: hidden; border-radius: 99px; background: var(--surface-2); }
+  .bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--hero-from), var(--hero-to)); transition: width .4s; }
+  .week-cats { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  /* ── Фильтр категорий ── */
+  .filters { display: flex; gap: 6px; margin: -2px -16px 12px; padding: 0 16px; overflow-x: auto; scrollbar-width: none; }
+  .filters::-webkit-scrollbar { display: none; }
+  .filter { flex: none; padding: 7px 12px; border-radius: 999px; background: var(--surface); font-size: 13px; font-weight: 700; }
+  .filter.on { background: var(--text); color: var(--bg); }
+
+  /* ── Карточка задачи ── */
   .card { display: flex; gap: 12px; padding: 14px; border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow); }
-  .when { flex: none; width: 52px; padding-right: 12px; border-right: 2px solid var(--accent); }
+  .when { flex: none; width: 52px; padding-right: 12px; border-right: 3px solid var(--cat, var(--accent)); }
   .when b { display: block; font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
   .when small { display: block; font-size: 11px; font-weight: 600; color: var(--muted); }
   .content { flex: 1; min-width: 0; }
   .content h3 { margin: 0; font-size: 16px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
   .desc { margin: 4px 0 0; color: var(--muted); font-size: 14px; overflow-wrap: anywhere;
           display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .subs { display: grid; gap: 2px; margin-top: 8px; }
+  .sub { display: flex; align-items: center; gap: 8px; min-height: 30px; text-align: left; font-size: 14px; overflow-wrap: anywhere; }
+  .sub i { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border: 2px solid var(--line); border-radius: 6px; color: transparent; }
+  .sub i svg { width: 12px; height: 12px; stroke-width: 3.5; }
+  .sub.done { color: var(--muted); text-decoration: line-through; }
+  .sub.done i { border-color: var(--cat, var(--accent)); background: var(--cat, var(--accent)); color: #fff; }
   .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .tag { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 4px 9px; border-radius: 8px;
          background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: 600; }
   .tag svg { width: 13px; height: 13px; }
-  .tag.warn { background: var(--danger-soft); color: var(--danger); }
   .tag span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag.cat { color: var(--cat); background: color-mix(in srgb, var(--cat) 13%, transparent); }
+  .tag.hot { color: var(--danger); background: var(--danger-soft); }
+  .tag.warn { background: var(--danger-soft); color: var(--danger); }
   .card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
-  .act { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 10px;
-         background: var(--surface-2); font-size: 13px; font-weight: 700; }
+  .act { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13px; font-weight: 700; }
   .act svg { width: 15px; height: 15px; }
-  .act.icon-only { margin-left: auto; padding: 7px 9px; }
   .act.primary { background: var(--accent); color: var(--on-accent); }
   .act.danger { color: var(--danger); background: var(--danger-soft); }
+  .act.icon-only { margin-left: auto; padding: 7px 9px; }
   .check { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
            border: 2px solid var(--line); color: transparent; transition: background .15s, border-color .15s; }
   .check svg { width: 16px; height: 16px; stroke-width: 3; }
-  .card.done .check { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+  .card.done .check { border-color: var(--cat, var(--accent)); background: var(--cat, var(--accent)); color: #fff; }
   .card.done h3 { color: var(--muted); text-decoration: line-through; }
-  .card.done .when { border-color: var(--line); }
   .card.pending { background: var(--accent-soft); box-shadow: none; }
-  .card.pending .when { border-color: transparent; padding-right: 0; width: auto; }
 
   .empty { padding: 28px 20px; border: 2px dashed var(--line); border-radius: var(--r-lg); text-align: center; color: var(--muted); }
   .empty b { display: block; margin-bottom: 4px; font-size: 16px; color: var(--text); }
   .empty p { margin: 0; font-size: 14px; }
   .fatal { margin: 30vh 24px 0; text-align: center; color: var(--muted); }
 
-  /* ── Нижние листы ────────────────────────────────── */
+  /* ── Нижние листы ── */
   .sheet { position: fixed; inset: 0; z-index: 10; display: flex; align-items: flex-end; background: rgba(10, 8, 30, .45);
            opacity: 0; pointer-events: none; transition: opacity .2s; }
   .sheet.open { opacity: 1; pointer-events: auto; }
   .panel { width: 100%; max-height: 92vh; overflow-y: auto; overscroll-behavior: contain;
            padding: 10px 16px calc(20px + env(safe-area-inset-bottom)); border-radius: var(--r-xl) var(--r-xl) 0 0;
            background: var(--bg); transform: translateY(100%); transition: transform .28s cubic-bezier(.2, .8, .2, 1); }
+  .panel.tall { height: 92vh; }
   .sheet.open .panel { transform: none; }
   .grip { width: 40px; height: 5px; margin: 0 auto 10px; border-radius: 3px; background: var(--line); }
-  .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
   .sheet-head h3 { margin: 0; font-size: 21px; font-weight: 800; letter-spacing: -.01em; }
-  .close { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--surface); color: var(--muted); }
+  .close { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 50%; background: var(--surface); color: var(--muted); }
   .label { margin: 18px 4px 8px; font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
   .hint { margin: 8px 4px 0; font-size: 13px; color: var(--muted); }
-
-  .input { display: block; margin-bottom: 10px; padding: 10px 14px; border: 1.5px solid transparent; border-radius: var(--r-md);
-           background: var(--surface); transition: border-color .15s; }
+  .input { position: relative; display: block; margin-bottom: 10px; padding: 10px 14px; border: 1.5px solid transparent;
+           border-radius: var(--r-md); background: var(--surface); transition: border-color .15s; }
   .input:focus-within { border-color: var(--accent); }
   .input > span { display: block; margin-bottom: 2px; font-size: 12px; font-weight: 700; color: var(--muted); }
   .input input, .input textarea, .input select { display: block; width: 100%; min-height: 24px; padding: 0; border: 0; outline: 0;
            background: none; color: var(--text); font-weight: 600; resize: none; -webkit-appearance: none; appearance: none; }
   .input textarea { font-weight: 500; }
-  .input.select { position: relative; }
   .input.select::after { content: ""; position: absolute; right: 16px; bottom: 16px; width: 7px; height: 7px;
                          border: solid var(--muted); border-width: 0 2px 2px 0; transform: rotate(45deg); pointer-events: none; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .row2.single { grid-template-columns: 1fr; }
   .switch { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding: 12px 14px;
             border-radius: var(--r-md); background: var(--surface); font-weight: 600; }
-  .switch input { position: relative; width: 46px; height: 28px; margin: 0; border-radius: 999px; background: var(--line);
+  .switch input { position: relative; flex: none; width: 46px; height: 28px; margin: 0; border-radius: 999px; background: var(--line);
                   -webkit-appearance: none; appearance: none; cursor: pointer; transition: background .2s; }
   .switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%;
                          background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); transition: transform .2s; }
   .switch input:checked { background: var(--accent); }
   .switch input:checked::after { transform: translateX(18px); }
-
   .chips { display: flex; flex-wrap: wrap; gap: 8px; }
   .chip { padding: 8px 13px; border-radius: 999px; background: var(--surface); font-size: 14px; font-weight: 600; transition: background .15s, color .15s; }
   .chip.on { background: var(--accent); color: var(--on-accent); }
-  .custom { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 8px 8px 8px 14px; border-radius: var(--r-md); background: var(--surface); }
+  .chip.cat.on { background: var(--cat); color: #fff; }
+  .seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: var(--r-md); background: var(--surface); }
+  .seg button { padding: 9px 4px; border-radius: 10px; font-size: 14px; font-weight: 700; color: var(--muted); }
+  .seg button.on { background: var(--accent); color: var(--on-accent); }
+  .seg button.on.high { background: var(--danger); }
+  .custom, .sub-add { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 8px 8px 8px 14px; border-radius: var(--r-md); background: var(--surface); }
   .custom > span { flex: 1; font-size: 14px; font-weight: 600; color: var(--muted); }
   .custom input, .custom select { height: 34px; padding: 0 8px; border: 0; border-radius: 10px; outline: 0; background: var(--surface-2); font-weight: 700; }
   .custom input { width: 56px; text-align: center; }
-  .custom button { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--accent); color: var(--on-accent); }
-
+  .sub-add input { flex: 1; min-width: 0; height: 34px; border: 0; outline: 0; background: none; font-weight: 600; }
+  .plus { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 10px; background: var(--accent); color: var(--on-accent); }
+  .sub-list { display: grid; gap: 6px; }
+  .sub-row { display: flex; align-items: center; gap: 10px; padding: 10px 8px 10px 14px; border-radius: var(--r-md); background: var(--surface); }
+  .sub-row span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .sub-row button { display: grid; place-items: center; width: 30px; height: 30px; color: var(--muted); }
   .box { padding: 16px; border-radius: var(--r-md); background: var(--surface); }
   .box p { margin: 0; font-size: 14px; color: var(--muted); }
   .cal-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
   .cal-btns button { padding: 11px 6px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); font-weight: 700; }
-
   .primary-btn, .danger-btn { display: block; width: 100%; height: 52px; margin-top: 20px; border-radius: 16px; font-size: 16px; font-weight: 800; }
   .primary-btn { background: linear-gradient(150deg, var(--hero-from), var(--hero-to)); color: #fff; }
   .primary-btn:active { opacity: .85; }
+  .primary-btn:disabled { opacity: .5; }
   .danger-btn { margin-top: 10px; background: var(--danger-soft); color: var(--danger); }
+
+  /* Поиск */
+  .search-box { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding: 0 14px; height: 48px;
+                border: 1.5px solid var(--accent); border-radius: var(--r-md); background: var(--surface); }
+  .search-box > span { display: grid; color: var(--muted); }
+  .search-box input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font-weight: 600; }
+
+  /* План дня */
+  .plan-row { display: flex; gap: 12px; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface); }
+  .plan-row b { flex: none; font-variant-numeric: tabular-nums; }
+  .plan-comment { margin: 14px 4px 0; color: var(--muted); }
+  .loading { padding: 40px 0; text-align: center; color: var(--muted); }
+
+  /* Тост «Отменить» */
+  .toast { position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 30;
+           display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 16px; border-radius: 16px;
+           background: #17162e; color: #fff; box-shadow: 0 10px 30px rgba(0, 0, 0, .25);
+           transform: translateY(150%); visibility: hidden; transition: transform .25s cubic-bezier(.2, .8, .2, 1), visibility .25s; }
+  .toast.show { transform: none; visibility: visible; }
+  .toast span { flex: 1; font-weight: 600; }
+  .toast button { padding: 8px 12px; border-radius: 10px; background: rgba(255, 255, 255, .14); color: #c9bfff; font-weight: 800; }
+
+  /* Знакомство */
+  .onboard { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; padding: 24px 24px calc(24px + env(safe-area-inset-bottom));
+             background: linear-gradient(160deg, var(--hero-from), var(--hero-to)); color: #fff; }
+  .onboard-skip { align-self: flex-end; padding: 8px 4px; color: rgba(255, 255, 255, .8); font-weight: 700; }
+  .slide { flex: 1; display: flex; flex-direction: column; justify-content: center; text-align: center; }
+  .slide-icon { display: grid; place-items: center; width: 112px; height: 112px; margin: 0 auto 28px; border-radius: 32px; background: rgba(255, 255, 255, .16); }
+  .slide-icon svg { width: 56px; height: 56px; stroke-width: 1.6; }
+  .slide h2 { margin: 0 0 12px; font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
+  .slide p { margin: 0 auto; max-width: 340px; font-size: 16px; line-height: 1.5; opacity: .9; }
+  .onboard-dots { display: flex; justify-content: center; gap: 8px; margin-bottom: 20px; }
+  .onboard-dots i { width: 8px; height: 8px; border-radius: 99px; background: rgba(255, 255, 255, .35); transition: width .2s; }
+  .onboard-dots i.on { width: 24px; background: #fff; }
+  .onboard-next { height: 54px; border-radius: 16px; background: #fff; color: var(--hero-from); font-size: 16px; font-weight: 800; }
 </style>
 </head>
 <body>
 <header class="hero">
   <div class="hero-top">
-    <div class="eyebrow">Мои задачи</div>
-    <button class="hbtn" id="gear" aria-label="Настройки"></button>
+    <div class="eyebrow" data-t="my_tasks"></div>
+    <div class="nav">
+      <button class="hbtn" id="search-btn" data-icon="search" data-aria="search_aria"></button>
+      <button class="hbtn" id="gear" data-icon="gear" data-aria="settings_aria"></button>
+    </div>
   </div>
   <div class="hero-month">
     <h1 id="month"></h1>
     <div class="nav">
-      <button class="hbtn" id="to-today">Сегодня</button>
-      <button class="hbtn" id="prev" aria-label="Предыдущий месяц"></button>
-      <button class="hbtn" id="next" aria-label="Следующий месяц"></button>
+      <button class="hbtn" id="to-today" data-t="today"></button>
+      <button class="hbtn" id="prev" data-icon="left" data-aria="prev"></button>
+      <button class="hbtn" id="next" data-icon="right" data-aria="next"></button>
     </div>
   </div>
-  <div class="weekdays"><span>пн</span><span>вт</span><span>ср</span><span>чт</span><span>пт</span><span>сб</span><span>вс</span></div>
+  <div class="weekdays" id="weekdays"></div>
   <div class="grid" id="grid"></div>
 </header>
 
 <main id="main">
+  <section class="week" id="week" hidden>
+    <div class="week-top"><b data-t="this_week"></b><span id="week-sum"></span></div>
+    <div class="bar"><i id="week-bar"></i></div>
+    <div class="week-cats" id="week-cats"></div>
+  </section>
   <section id="inbox" hidden>
-    <div class="sec-head"><h2>Нужно подтвердить</h2><span class="badge" id="inbox-count"></span></div>
+    <div class="sec-head"><h2 data-t="need_confirm"></h2><span class="badge" id="inbox-count"></span></div>
     <div class="stack" id="inbox-list"></div>
   </section>
   <section>
     <div class="sec-head">
       <div><h2 id="day-title"></h2><p id="day-sub"></p></div>
-      <button class="add-btn" id="add"></button>
+      <div class="head-actions">
+        <button class="soft-btn" id="plan-btn" hidden></button>
+        <button class="soft-btn" id="add"></button>
+      </div>
     </div>
+    <div class="filters" id="filters"></div>
     <div class="stack" id="day-list"></div>
   </section>
 </main>
@@ -218,46 +271,89 @@
 <div class="sheet" id="editor">
   <div class="panel">
     <div class="grip"></div>
-    <div class="sheet-head"><h3 id="ed-heading"></h3><button class="close" data-close aria-label="Закрыть"></button></div>
-    <label class="input"><span>Название</span><input id="f-title" maxlength="100" placeholder="Встреча с Мишей"></label>
-    <label class="input"><span>Описание</span><textarea id="f-desc" rows="3" maxlength="500" placeholder="Детали, что взять с собой, ссылки"></textarea></label>
-    <label class="input"><span>Место</span><input id="f-loc" maxlength="100" placeholder="Необязательно"></label>
-    <label class="switch">Весь день<input type="checkbox" id="f-allday"></label>
+    <div class="sheet-head"><h3 id="ed-heading"></h3><button class="close" data-close data-icon="close" data-aria="close"></button></div>
+    <label class="input"><span data-t="f_title"></span><input id="f-title" maxlength="100" data-ph="f_title_ph"></label>
+    <label class="input"><span data-t="f_desc"></span><textarea id="f-desc" rows="3" maxlength="500" data-ph="f_desc_ph"></textarea></label>
+    <label class="input"><span data-t="f_loc"></span><input id="f-loc" maxlength="100" data-ph="optional"></label>
+    <label class="switch"><span data-t="all_day_switch"></span><input type="checkbox" id="f-allday"></label>
     <div class="row2" id="f-when">
-      <label class="input"><span>Дата</span><input type="date" id="f-date"></label>
-      <label class="input" id="f-time-box"><span>Время</span><input type="time" id="f-time"></label>
+      <label class="input"><span data-t="date"></span><input type="date" id="f-date"></label>
+      <label class="input" id="f-time-box"><span data-t="time"></span><input type="time" id="f-time"></label>
     </div>
-    <label class="input select"><span>Повтор</span><select id="f-repeat"></select></label>
-    <p class="hint" id="f-repeat-hint" hidden>Задача повторяется. Изменения коснутся только этой задачи, «Не повторять» остановит серию.</p>
-    <div class="label">Напомнить</div>
+    <div class="label" data-t="category"></div>
+    <div class="chips" id="f-cats"></div>
+    <div class="label" data-t="priority"></div>
+    <div class="seg" id="f-prio"></div>
+    <div class="label" data-t="subtasks"></div>
+    <div class="sub-list" id="f-subs"></div>
+    <div class="sub-add"><input id="f-sub-input" maxlength="100" data-ph="sub_ph"><button class="plus" id="f-sub-add" data-icon="plus" data-aria="add"></button></div>
+    <label class="input select" style="margin-top: 18px"><span data-t="repeat"></span><select id="f-repeat"></select></label>
+    <p class="hint" id="f-repeat-hint" data-t="repeat_hint" hidden></p>
+    <div class="label" data-t="remind"></div>
     <div id="f-reminders"></div>
-    <button class="primary-btn" id="f-save">Сохранить</button>
-    <button class="danger-btn" id="f-delete">Удалить задачу</button>
+    <button class="primary-btn" id="f-save" data-t="save"></button>
+    <button class="danger-btn" id="f-delete" data-t="delete_task"></button>
   </div>
 </div>
 
 <div class="sheet" id="settings">
   <div class="panel">
     <div class="grip"></div>
-    <div class="sheet-head"><h3>Настройки</h3><button class="close" data-close aria-label="Закрыть"></button></div>
-    <div class="label">Напоминания по умолчанию</div>
+    <div class="sheet-head"><h3 data-t="settings"></h3><button class="close" data-close data-icon="close" data-aria="close"></button></div>
+    <label class="input select"><span data-t="language"></span><select id="s-lang">
+      <option value="ru">Русский</option><option value="en">English</option><option value="ky">Кыргызча</option>
+    </select></label>
+    <div class="label" data-t="default_rem"></div>
     <div id="s-reminders"></div>
-    <p class="hint">Для новых задач. У каждой задачи можно выбрать свои. Для задач на весь день отсчёт от 9:00.</p>
-    <label class="switch" style="margin-top: 12px">Умные напоминания<input type="checkbox" id="s-smart"></label>
-    <p class="hint">ИИ сам подбирает время под тип дела: самолёт — за день и за 3 часа, созвон — за час и за 10 минут.</p>
-    <div class="label">Утро и вечер</div>
-    <label class="input select"><span>План на день</span><select id="s-digest"></select></label>
-    <label class="input select"><span>Вечерний итог — что не успел</span><select id="s-evening"></select></label>
-    <div class="label">Календарь телефона</div>
+    <p class="hint" data-t="rem_hint"></p>
+    <label class="switch" style="margin-top: 12px"><span data-t="smart"></span><input type="checkbox" id="s-smart"></label>
+    <p class="hint" data-t="smart_hint"></p>
+    <div class="label" data-t="morning_evening"></div>
+    <label class="input select"><span data-t="day_plan"></span><select id="s-digest"></select></label>
+    <label class="input select"><span data-t="evening"></span><select id="s-evening"></select></label>
+    <p class="hint" data-t="weekly_hint"></p>
+    <div class="label" data-t="phone_cal"></div>
     <div class="box">
-      <p>Подключи один раз — подтверждённые задачи будут появляться в твоём календаре сами.</p>
+      <p data-t="phone_cal_text"></p>
       <div class="cal-btns">
         <button data-cal="apple">iPhone</button>
         <button data-cal="google">Google</button>
-        <button data-cal="url">Другой</button>
+        <button data-cal="url" data-t="other"></button>
       </div>
     </div>
   </div>
+</div>
+
+<div class="sheet" id="search">
+  <div class="panel tall">
+    <div class="grip"></div>
+    <div class="sheet-head"><h3 data-t="search"></h3><button class="close" data-close data-icon="close" data-aria="close"></button></div>
+    <label class="search-box"><span data-icon="search"></span><input id="q" type="search" data-ph="search_ph" enterkeyhint="search"></label>
+    <div class="stack" id="results"></div>
+  </div>
+</div>
+
+<div class="sheet" id="planner">
+  <div class="panel">
+    <div class="grip"></div>
+    <div class="sheet-head"><h3 data-t="plan_title"></h3><button class="close" data-close data-icon="close" data-aria="close"></button></div>
+    <div class="stack" id="plan-list"></div>
+    <p class="plan-comment" id="plan-comment"></p>
+    <button class="primary-btn" id="plan-apply" data-t="apply"></button>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"><span id="toast-text"></span><button id="toast-undo" data-t="undo"></button></div>
+
+<div class="onboard" id="onboard" hidden>
+  <button class="onboard-skip" id="onboard-skip" data-t="skip"></button>
+  <div class="slide">
+    <div class="slide-icon" id="slide-icon"></div>
+    <h2 id="slide-title"></h2>
+    <p id="slide-text"></p>
+  </div>
+  <div class="onboard-dots" id="onboard-dots"><i></i><i></i><i></i></div>
+  <button class="onboard-next" id="onboard-next"></button>
 </div>
 
 <script>
@@ -266,13 +362,145 @@ tg.ready();
 tg.expand();
 tg.disableVerticalSwipes?.();
 
+/* ── Тексты (кыргызский стоит вычитать носителю языка) ── */
+const L = {
+  ru: {
+    my_tasks: "Мои задачи", today: "Сегодня", tomorrow: "Завтра", need_confirm: "Нужно подтвердить", this_week: "Эта неделя",
+    week_sum: "выполнено {d} из {t}", ai_found: "🤖 ИИ нашёл {n}", week_empty: "задач пока нет",
+    add: "Добавить", edit: "Изменить", delete: "Удалить", reject: "Отклонить", task_btn: "Задача", plan_btn: "План",
+    all: "Все", all_a: "весь", all_b: "день", done_n: "выполнено {n}", mark_done: "Отметить выполненной",
+    empty_past: "В этот день задач не было", empty: "Ничего не запланировано",
+    empty_text: "Перешли боту сообщение с делом, надиктуй голосовое или добавь задачу вручную.",
+    fatal: "Открой календарь из Telegram", fatal_text: "Он работает внутри бота — кнопка «Календарь» в чате.",
+    new_task: "Новая задача", task: "Задача", f_title: "Название", f_title_ph: "Встреча с Мишей", f_desc: "Описание",
+    f_desc_ph: "Детали, что взять с собой, ссылки", f_loc: "Место", optional: "Необязательно", all_day_switch: "Весь день",
+    date: "Дата", time: "Время", category: "Категория", priority: "Приоритет", subtasks: "Подзадачи", sub_ph: "Новый пункт",
+    repeat: "Повтор", repeat_hint: "Задача повторяется. Изменения коснутся только этой задачи, «Не повторять» остановит серию.",
+    remind: "Напомнить", save: "Сохранить", delete_task: "Удалить задачу", need_title: "Укажи название и дату.",
+    save_failed: "Не получилось сохранить, попробуй ещё раз.", delete_q: "Удалить «{t}»?", series_title: "Повторяющаяся задача",
+    only_this: "Только эту", this_and_next: "Эту и все следующие", max_rem: "Не больше {n} напоминаний.",
+    rem_range: "Можно от 1 минуты до 30 дней.", custom: "Своё: за", u_min: "мин", u_h: "ч", u_d: "дн",
+    settings: "Настройки", language: "Язык", default_rem: "Напоминания по умолчанию",
+    rem_hint: "Для новых задач. У каждой задачи можно выбрать свои. Для задач на весь день отсчёт от 9:00.",
+    smart: "Умные напоминания", smart_hint: "ИИ сам подбирает время под тип дела: самолёт — за день и за 3 часа, созвон — за час и за 10 минут.",
+    morning_evening: "Утро и вечер", day_plan: "План на день", evening: "Вечерний итог — что не успел",
+    weekly_hint: "По воскресеньям в 18:00 приходит обзор недели, если включён вечерний итог.",
+    no_send: "Не присылать", every_day: "Каждый день в {h}:00", phone_cal: "Календарь телефона",
+    phone_cal_text: "Подключи один раз — подтверждённые задачи будут появляться в твоём календаре сами.", other: "Другой",
+    copied: "Ссылка скопирована. Добавь её в календаре как подписку по URL.",
+    search: "Поиск", search_ph: "Название, место, описание…", nothing: "Ничего не нашлось", type_more: "Введи хотя бы 2 буквы",
+    deleted: "Задача удалена", deleted_series: "Серия удалена", undo: "Отменить",
+    plan_title: "План на день", apply: "Применить", planning: "ИИ раскладывает дела по свободным окнам…",
+    plan_nothing: "Планировать нечего: на этот день нет дел без времени.", plan_failed: "Не получилось составить план, попробуй позже.",
+    clash: "пересекается с {t}", search_aria: "Поиск", settings_aria: "Настройки",
+    prev: "Предыдущий месяц", next: "Следующий месяц", close: "Закрыть", skip: "Пропустить", next_btn: "Далее", start: "Начать",
+    rep: { "": "Не повторять", daily: "Каждый день", weekdays: "По будням", weekly: "Каждую неделю", monthly: "Каждый месяц" },
+    cat: { work: "Работа", personal: "Личное", shopping: "Покупки", health: "Здоровье", study: "Учёба", other: "Другое" },
+    prio: { high: "🔥 Важно", normal: "Обычно", low: "Не срочно" },
+    slides: [
+      ["Дела из всех чатов", "Пересылай боту сообщения, голосовые и скриншоты — ИИ найдёт встречи, дедлайны и дела и предложит их добавить."],
+      ["Календарь и напоминания", "Все задачи здесь: по дням, с категориями и подзадачами. Напомню, когда скажешь, и спланирую день."],
+      ["Просто спроси", "Напиши боту «что у меня завтра?» или «перенеси встречу на субботу». А в любом чате набери @бота, чтобы поделиться встречей."],
+    ],
+    forms: { task: ["задача", "задачи", "задач"], rem: ["напоминание", "напоминания", "напоминаний"], day: ["день", "дня", "дней"] },
+  },
+  en: {
+    my_tasks: "My tasks", today: "Today", tomorrow: "Tomorrow", need_confirm: "Needs confirmation", this_week: "This week",
+    week_sum: "{d} of {t} done", ai_found: "🤖 AI found {n}", week_empty: "no tasks yet",
+    add: "Add", edit: "Edit", delete: "Delete", reject: "Reject", task_btn: "Task", plan_btn: "Plan",
+    all: "All", all_a: "all", all_b: "day", done_n: "{n} done", mark_done: "Mark as done",
+    empty_past: "No tasks that day", empty: "Nothing planned",
+    empty_text: "Forward a message to the bot, send a voice note or add a task manually.",
+    fatal: "Open the calendar from Telegram", fatal_text: "It works inside the bot — use the “Calendar” button in the chat.",
+    new_task: "New task", task: "Task", f_title: "Title", f_title_ph: "Meeting with Mike", f_desc: "Description",
+    f_desc_ph: "Details, what to bring, links", f_loc: "Location", optional: "Optional", all_day_switch: "All day",
+    date: "Date", time: "Time", category: "Category", priority: "Priority", subtasks: "Subtasks", sub_ph: "New item",
+    repeat: "Repeat", repeat_hint: "This task repeats. Changes apply to this task only; “Don't repeat” stops the series.",
+    remind: "Remind me", save: "Save", delete_task: "Delete task", need_title: "Enter a title and a date.",
+    save_failed: "Couldn't save, please try again.", delete_q: "Delete “{t}”?", series_title: "Repeating task",
+    only_this: "Only this one", this_and_next: "This and following", max_rem: "No more than {n} reminders.",
+    rem_range: "From 1 minute to 30 days.", custom: "Custom:", u_min: "min", u_h: "h", u_d: "d",
+    settings: "Settings", language: "Language", default_rem: "Default reminders",
+    rem_hint: "For new tasks. Each task can have its own. All-day tasks count from 9:00.",
+    smart: "Smart reminders", smart_hint: "AI picks the timing by task type: a flight — a day and 3 hours before, a call — an hour and 10 minutes before.",
+    morning_evening: "Morning and evening", day_plan: "Daily plan", evening: "Evening wrap-up — what's left",
+    weekly_hint: "On Sundays at 18:00 you get a weekly review if the evening wrap-up is on.",
+    no_send: "Off", every_day: "Every day at {h}:00", phone_cal: "Phone calendar",
+    phone_cal_text: "Connect once — confirmed tasks will appear in your calendar automatically.", other: "Other",
+    copied: "Link copied. Add it in your calendar as a subscription by URL.",
+    search: "Search", search_ph: "Title, location, description…", nothing: "Nothing found", type_more: "Type at least 2 letters",
+    deleted: "Task deleted", deleted_series: "Series deleted", undo: "Undo",
+    plan_title: "Day plan", apply: "Apply", planning: "AI is fitting tasks into free slots…",
+    plan_nothing: "Nothing to plan: no untimed tasks that day.", plan_failed: "Couldn't build a plan, please try later.",
+    clash: "overlaps {t}", search_aria: "Search", settings_aria: "Settings",
+    prev: "Previous month", next: "Next month", close: "Close", skip: "Skip", next_btn: "Next", start: "Get started",
+    rep: { "": "Don't repeat", daily: "Every day", weekdays: "Weekdays", weekly: "Every week", monthly: "Every month" },
+    cat: { work: "Work", personal: "Personal", shopping: "Shopping", health: "Health", study: "Study", other: "Other" },
+    prio: { high: "🔥 Important", normal: "Normal", low: "Not urgent" },
+    slides: [
+      ["Tasks from every chat", "Forward messages, voice notes and screenshots to the bot — AI finds meetings, deadlines and tasks and offers to add them."],
+      ["Calendar and reminders", "All your tasks live here: by day, with categories and subtasks. I'll remind you when you want and plan your day."],
+      ["Just ask", "Tell the bot “what do I have tomorrow?” or “move the meeting to Saturday”. Type @bot in any chat to share a meeting."],
+    ],
+    forms: { task: ["task", "tasks"], rem: ["reminder", "reminders"], day: ["day", "days"] },
+  },
+  ky: {
+    my_tasks: "Менин иштерим", today: "Бүгүн", tomorrow: "Эртең", need_confirm: "Ырастоо керек", this_week: "Бул жума",
+    week_sum: "{t} ичинен {d} аткарылды", ai_found: "🤖 ЖИ тапты: {n}", week_empty: "азырынча иш жок",
+    add: "Кошуу", edit: "Өзгөртүү", delete: "Өчүрүү", reject: "Четке кагуу", task_btn: "Иш", plan_btn: "План",
+    all: "Баары", all_a: "күн", all_b: "бою", done_n: "{n} аткарылды", mark_done: "Аткарылды деп белгилөө",
+    empty_past: "Бул күнү иш болгон жок", empty: "Эч нерсе пландалган эмес",
+    empty_text: "Ботко иш тууралуу билдирүү жөнөтүңүз, үн жазыңыз же ишти кол менен кошуңуз.",
+    fatal: "Календарды Telegram'дан ачыңыз", fatal_text: "Ал боттун ичинде иштейт — чаттагы «Календарь» баскычы.",
+    new_task: "Жаңы иш", task: "Иш", f_title: "Аталышы", f_title_ph: "Миша менен жолугушуу", f_desc: "Сүрөттөмө",
+    f_desc_ph: "Деталдар, эмне алуу керек, шилтемелер", f_loc: "Жери", optional: "Милдеттүү эмес", all_day_switch: "Күн бою",
+    date: "Күнү", time: "Убактысы", category: "Категория", priority: "Маанилүүлүгү", subtasks: "Майда иштер", sub_ph: "Жаңы пункт",
+    repeat: "Кайталоо", repeat_hint: "Бул иш кайталанат. Өзгөртүүлөр ушул ишке гана тиешелүү, «Кайталабоо» серияны токтотот.",
+    remind: "Эскертүү", save: "Сактоо", delete_task: "Ишти өчүрүү", need_title: "Аталышын жана күнүн жазыңыз.",
+    save_failed: "Сактай алган жокмун, кайра аракет кылыңыз.", delete_q: "«{t}» өчүрөсүзбү?", series_title: "Кайталануучу иш",
+    only_this: "Ушуну гана", this_and_next: "Ушуну жана кийинкилерин", max_rem: "{n} эскертмеден ашпасын.",
+    rem_range: "1 мүнөттөн 30 күнгө чейин.", custom: "Өзүңүздүкү:", u_min: "мүн", u_h: "саат", u_d: "күн",
+    settings: "Жөндөөлөр", language: "Тил", default_rem: "Демейки эскертмелер",
+    rem_hint: "Жаңы иштер үчүн. Ар бир иш үчүн өзүнчө тандаса болот. Күн бою иштер үчүн 9:00дөн эсептелет.",
+    smart: "Акылдуу эскертмелер", smart_hint: "ЖИ иштин түрүнө жараша убакытты тандайт: учак — бир күн жана 3 саат мурун, чалуу — бир саат жана 10 мүнөт мурун.",
+    morning_evening: "Эртең менен жана кечинде", day_plan: "Күндүн планы", evening: "Кечки жыйынтык — эмне калды",
+    weekly_hint: "Кечки жыйынтык күйгүзүлгөн болсо, жекшемби күнү саат 18:00дө жуманын сереби келет.",
+    no_send: "Жөнөтпөө", every_day: "Күн сайын саат {h}:00дө", phone_cal: "Телефондун календары",
+    phone_cal_text: "Бир жолу туташтырыңыз — ырасталган иштер календарыңызга өзү эле түшөт.", other: "Башка",
+    copied: "Шилтеме көчүрүлдү. Аны календарга URL аркылуу жазылуу катары кошуңуз.",
+    search: "Издөө", search_ph: "Аталышы, жери, сүрөттөмөсү…", nothing: "Эч нерсе табылган жок", type_more: "Жок дегенде 2 тамга жазыңыз",
+    deleted: "Иш өчүрүлдү", deleted_series: "Серия өчүрүлдү", undo: "Кайтаруу",
+    plan_title: "Күндүн планы", apply: "Колдонуу", planning: "ЖИ иштерди бош убакытка жайгаштырып жатат…",
+    plan_nothing: "Пландай турган эч нерсе жок: бул күнү убакытсыз иш жок.", plan_failed: "План түзө алган жокмун, кийинчерээк кайталаңыз.",
+    clash: "{t} менен кесилишет", search_aria: "Издөө", settings_aria: "Жөндөөлөр",
+    prev: "Мурунку ай", next: "Кийинки ай", close: "Жабуу", skip: "Өткөрүп жиберүү", next_btn: "Кийинки", start: "Баштоо",
+    rep: { "": "Кайталабоо", daily: "Күн сайын", weekdays: "Иш күндөрү", weekly: "Жума сайын", monthly: "Ай сайын" },
+    cat: { work: "Жумуш", personal: "Жеке", shopping: "Сатып алуу", health: "Ден соолук", study: "Окуу", other: "Башка" },
+    prio: { high: "🔥 Маанилүү", normal: "Кадимки", low: "Шашылыш эмес" },
+    slides: [
+      ["Бардык чаттардагы иштер", "Ботко билдирүүлөрдү, үн жазууларды жана скриншотторду жөнөтүңүз — ЖИ жолугушууларды, мөөнөттөрдү жана иштерди таап, кошууну сунуштайт."],
+      ["Календарь жана эскертмелер", "Бардык иштер ушул жерде: күндөр боюнча, категориялар жана майда иштер менен. Каалаган убакта эскертип, күнүңүздү пландайм."],
+      ["Жөн эле сураңыз", "Ботко «эртең менде эмне бар?» же «жолугушууну ишембиге жылдыр» деп жазыңыз. Каалаган чатта @ботту жазып, жолугушууну бөлүшүңүз."],
+    ],
+    forms: { task: ["иш"], rem: ["эскертме"], day: ["күн"] },
+  },
+};
+const tgCode = (tg.initDataUnsafe?.user?.language_code || "ru").split("-")[0];
+let lang = tgCode === "ky" ? "ky" : ["ru", "uk", "be", "kk", "uz", "tg"].includes(tgCode) ? "ru" : "en";
+const tr = (key, vars = {}) => String(L[lang][key] ?? L.ru[key] ?? key).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? "");
+const plural = (n, key) => {
+  const f = L[lang].forms[key];
+  if (lang === "ru") return n % 10 === 1 && n % 100 !== 11 ? f[0] : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? f[1] : f[2];
+  return lang === "en" ? f[n === 1 ? 0 : 1] : f[0];
+};
+const count = (n, key) => `${n} ${plural(n, key)}`;
+
+/* ── Иконки и мелочи ───────────────────────────────── */
 const ICONS = {
-  left: '<path d="M15 18l-6-6 6-6"/>',
-  right: '<path d="M9 18l6-6-6-6"/>',
+  left: '<path d="M15 18l-6-6 6-6"/>', right: '<path d="M9 18l6-6-6-6"/>',
   gear: '<path d="M20 7h-9M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>',
-  check: '<path d="M20 6 9 17l-5-5"/>',
-  close: '<path d="M18 6 6 18M6 6l12 12"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', check: '<path d="M20 6 9 17l-5-5"/>', close: '<path d="M18 6 6 18M6 6l12 12"/>',
   edit: '<path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
   trash: '<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
   pin: '<path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
@@ -281,9 +509,12 @@ const ICONS = {
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
   alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/>',
+  sparkles: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 17v4M17 19h4"/>',
+  message: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
 };
 const svg = name => `<svg viewBox="0 0 24 24">${ICONS[name]}</svg>`;  // только свои статичные иконки
-
+const CATS = ["work", "personal", "shopping", "health", "study", "other"];
+const CAT_ICON = { work: "💼", personal: "🏠", shopping: "🛒", health: "🩺", study: "📚", other: "📌" };
 const $ = s => document.querySelector(s);
 const el = (tag, cls, text) => {
   const e = document.createElement(tag);
@@ -297,40 +528,38 @@ const withIcon = (tag, cls, icon, text) => {
   if (text != null) e.append(el("span", "", text));
   return e;
 };
+const catStyle = (node, cat) => node.style.setProperty("--cat", `var(--c-${CATS.includes(cat) ? cat : "other"})`);
 const haptic = (kind = "light") => tg.HapticFeedback?.impactOccurred(kind);
 const tick = () => tg.HapticFeedback?.selectionChanged();
 const pad = n => String(n).padStart(2, "0");
 const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const shift = (d, days) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + days);
 const asDate = day => new Date(day + "T00:00");
-const cap = s => s[0].toUpperCase() + s.slice(1);
-const plural = (n, one, few, many) =>
-  n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many;
-const fmtMonth = new Intl.DateTimeFormat("ru", { month: "long" });
-const fmtDay = new Intl.DateTimeFormat("ru", { weekday: "long", day: "numeric", month: "long" });
-const fmtShort = new Intl.DateTimeFormat("ru", { weekday: "short", day: "numeric", month: "short" });
-const TODAY = iso(new Date());
-const TOMORROW = iso(shift(new Date(), 1));
-const dayName = day => day === TODAY ? "Сегодня" : day === TOMORROW ? "Завтра" : cap(fmtShort.format(asDate(day)));
+const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
+const TODAY = iso(new Date()), TOMORROW = iso(shift(new Date(), 1));
+const fmt = opts => new Intl.DateTimeFormat(lang, opts);
+const dayName = day => day === TODAY ? tr("today") : day === TOMORROW ? tr("tomorrow") : cap(fmt({ weekday: "short", day: "numeric", month: "short" }).format(asDate(day)));
+const when = t => dayName(t.start.slice(0, 10)) + (t.start[10] ? ", " + t.start.slice(11, 16) : "");
 
-// Напоминания — минуты до начала. Подписи совпадают с offset_label в bot.py.
-const REPEATS = { "": "Не повторять", daily: "Каждый день", weekdays: "По будням", weekly: "Каждую неделю", monthly: "Каждый месяц" };
+// Напоминания — минуты до начала. Подписи совпадают с texts.offset_label.
 const PRESETS = [0, 5, 15, 30, 60, 120, 1440, 2880, 10080];
-const MAX_OFFSET = 30 * 1440, MAX_REMINDERS = 10;
+const MAX_OFFSET = 30 * 1440, MAX_REMINDERS = 10, MAX_SUBTASKS = 20;
 function offsetLabel(m) {
-  if (m === 0) return "в момент начала";
-  if (m === 10080) return "за неделю";
-  if (m % 1440 === 0) { const d = m / 1440; return d === 1 ? "за день" : `за ${d} ${plural(d, "день", "дня", "дней")}`; }
-  const h = Math.floor(m / 60), mm = m % 60;
-  return "за " + [h && `${h} ч`, mm && `${mm} мин`].filter(Boolean).join(" ");
+  const U = { ru: ["ч", "мин"], en: ["h", "min"], ky: ["саат", "мүнөт"] }[lang];
+  if (m === 0) return { ru: "в момент начала", en: "at start", ky: "башталганда" }[lang];
+  if (m === 10080) return { ru: "за неделю", en: "1 week before", ky: "1 жума калганда" }[lang];
+  const span = m % 1440 === 0 ? (lang === "ru" && m === 1440 ? "день" : count(m / 1440, "day"))
+    : [Math.floor(m / 60) && `${Math.floor(m / 60)} ${U[0]}`, m % 60 && `${m % 60} ${U[1]}`].filter(Boolean).join(" ");
+  return { ru: `за ${span}`, en: `${span} before`, ky: `${span} калганда` }[lang];
 }
-const chipLabel = m => m === 0 ? "в начале" : offsetLabel(m);
 
+/* ── Состояние ─────────────────────────────────────── */
 let view = new Date(new Date().getFullYear(), new Date().getMonth(), 1);  // первый день показанного месяца
-let selected = TODAY;
-let tasks = [], settings = { reminders: [60], digest_hour: 9 }, calendar = {};
-let editing = null, current = null;
+let selected = TODAY, filter = "all";
+let tasks = [], settings = { reminders: [60], digest_hour: 9, evening_hour: 21, smart_reminders: true, lang }, calendar = {}, week = null;
+let editing = null, current = null, planItems = [];
 const editReminders = new Set(), defaultReminders = new Set();
+let editSubs = [], editCat = "other", editPrio = "normal";
 
 function applyTheme() {
   document.documentElement.dataset.theme = tg.colorScheme === "dark" ? "dark" : "light";
@@ -339,6 +568,29 @@ function applyTheme() {
     tg.setHeaderColor(css.getPropertyValue("--hero-from").trim());
     tg.setBackgroundColor(css.getPropertyValue("--bg").trim());
   } catch {}
+}
+
+function hourSelect(select, from, to) {
+  const value = select.value;
+  select.replaceChildren(Object.assign(el("option", "", tr("no_send")), { value: "" }));
+  for (let h = from; h <= to; h++) select.append(Object.assign(el("option", "", tr("every_day", { h })), { value: h }));
+  select.value = value;
+}
+
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-t]").forEach(n => { n.textContent = tr(n.dataset.t); });
+  document.querySelectorAll("[data-ph]").forEach(n => { n.placeholder = tr(n.dataset.ph); });
+  document.querySelectorAll("[data-aria]").forEach(n => n.setAttribute("aria-label", tr(n.dataset.aria)));
+  const wd = fmt({ weekday: "short" });
+  $("#weekdays").replaceChildren(...[0, 1, 2, 3, 4, 5, 6].map(i => el("span", "", wd.format(new Date(2024, 0, 1 + i)))));  // 1.01.2024 — понедельник
+  $("#add").innerHTML = svg("plus");
+  $("#add").append(tr("task_btn"));
+  $("#plan-btn").innerHTML = svg("sparkles");
+  $("#plan-btn").append(tr("plan_btn"));
+  $("#f-repeat").replaceChildren(...Object.entries(L[lang].rep).map(([k, v]) => Object.assign(el("option", "", v), { value: k })));
+  hourSelect($("#s-digest"), 5, 12);
+  hourSelect($("#s-evening"), 17, 23);
 }
 
 /* ── API ───────────────────────────────────────────── */
@@ -360,14 +612,15 @@ function gridInfo() {
 }
 
 async function load() {
-  const { start, count } = gridInfo();
-  ({ tasks, settings, calendar } = await api(`api/tasks?from=${iso(start)}&to=${iso(shift(start, count))}`));
+  const { start, count: n } = gridInfo();
+  ({ tasks, settings, calendar, week } = await api(`api/tasks?from=${iso(start)}&to=${iso(shift(start, n))}`));
+  if (settings.lang !== lang) { lang = settings.lang; applyLang(); }
   render();
 }
 
 async function save(path, body) {
-  try { await api(path, body); return true; }
-  catch { tg.showAlert("Не получилось сохранить, попробуй ещё раз."); return false; }
+  try { return await api(path, body); }
+  catch { tg.showAlert(tr("save_failed")); return null; }
   finally { await load().catch(() => {}); }
 }
 const update = (t, body) => save(`api/tasks/${t.id}`, body);
@@ -385,6 +638,7 @@ function select(day) {
   tick();
   const d = asDate(day);
   selected = day;
+  filter = "all";
   if (d.getMonth() !== view.getMonth() || d.getFullYear() !== view.getFullYear()) {
     view = new Date(d.getFullYear(), d.getMonth(), 1);
     load();
@@ -393,16 +647,16 @@ function select(day) {
 
 function renderCalendar(ok) {
   const title = $("#month");
-  title.textContent = cap(fmtMonth.format(view)) + " ";
+  title.textContent = cap(fmt({ month: "long" }).format(view)) + " ";
   title.append(el("span", "", view.getFullYear()));
   $("#to-today").hidden = selected === TODAY;
-
   const byDay = {};
   for (const t of ok) (byDay[t.start.slice(0, 10)] ??= []).push(t);
-  const { start, count } = gridInfo();
+  const { start, count: n } = gridInfo();
+  const full = fmt({ weekday: "long", day: "numeric", month: "long" });
   const grid = $("#grid");
   grid.replaceChildren();
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < n; i++) {
     const d = shift(start, i), key = iso(d);
     const cls = ["cell"];
     if (d.getMonth() !== view.getMonth()) cls.push("out");
@@ -414,68 +668,104 @@ function renderCalendar(ok) {
     const dots = el("span", "dots");
     for (const t of (byDay[key] || []).slice(0, 3)) dots.append(el("i", t.done ? "done" : ""));
     cell.append(dots);
-    cell.setAttribute("aria-label", cap(fmtDay.format(d)) + (byDay[key] ? `, задач: ${byDay[key].length}` : ""));
+    cell.setAttribute("aria-label", cap(full.format(d)) + (byDay[key] ? `, ${count(byDay[key].length, "task")}` : ""));
     cell.onclick = () => select(key);
     grid.append(cell);
   }
 }
 
-/* ── Карточки ──────────────────────────────────────── */
-function tags(t, withDate, clash) {
-  const box = el("div", "tags");
-  const add = (icon, text, cls = "") => box.append(withIcon("span", "tag " + cls, icon, text));
-  if (clash) add("alert", "пересекается с " + clash, "warn");
-  if (withDate) add("calendar", dayName(t.start.slice(0, 10)) + (t.start[10] ? ", " + t.start.slice(11, 16) : ""));
-  if (t.location) add("pin", t.location);
-  if (t.reminders.length && !t.done && t.status === "ok")
-    add("bell", t.reminders.length === 1 ? offsetLabel(t.reminders[0])
-      : `${t.reminders.length} ${plural(t.reminders.length, "напоминание", "напоминания", "напоминаний")}`);
-  if (t.repeat) add("repeat", REPEATS[t.repeat].toLowerCase());
-  if (t.source) add("chat", t.source);
-  return box.childElementCount ? box : null;
+function renderWeek() {
+  $("#week").hidden = !week;
+  if (!week) return;
+  const pct = week.total ? Math.round(100 * week.done / week.total) : 0;
+  $("#week-sum").textContent = week.total ? `${tr("week_sum", { d: week.done, t: week.total })} · ${pct}%` : tr("week_empty");
+  $("#week-bar").style.width = pct + "%";
+  const cats = $("#week-cats");
+  cats.replaceChildren();
+  if (week.ai) cats.append(el("span", "tag", tr("ai_found", { n: week.ai })));
+  for (const [c, [d, n]] of Object.entries(week.by_category).sort((a, b) => b[1][1] - a[1][1])) {
+    const tag = el("span", "tag cat", `${CAT_ICON[c] || "📌"} ${L[lang].cat[c] || c} ${d}/${n}`);
+    catStyle(tag, c);
+    cats.append(tag);
+  }
 }
 
-function taskCard(t, clash) {
+/* ── Карточки ──────────────────────────────────────── */
+function tags(t, { withDate = false, clash = null } = {}) {
+  const box = el("div", "tags");
+  const add = (icon, text, cls = "") => box.append(withIcon("span", "tag " + cls, icon, text));
+  const cat = el("span", "tag cat", `${CAT_ICON[t.category] || "📌"} ${L[lang].cat[t.category] || ""}`);
+  catStyle(cat, t.category);
+  box.append(cat);
+  if (t.priority === "high") box.append(el("span", "tag hot", L[lang].prio.high));
+  if (clash) add("alert", tr("clash", { t: clash }), "warn");
+  if (withDate) add("calendar", when(t));
+  if (t.location) add("pin", t.location);
+  if (t.reminders.length && !t.done && t.status === "ok")
+    add("bell", t.reminders.length === 1 ? offsetLabel(t.reminders[0]) : count(t.reminders.length, "rem"));
+  if (t.repeat) add("repeat", L[lang].rep[t.repeat].toLowerCase());
+  if (t.source) add("chat", t.source);
+  return box;
+}
+
+function subtaskList(t, interactive) {
+  const box = el("div", "subs");
+  t.subtasks.forEach((s, i) => {
+    const row = el(interactive ? "button" : "div", "sub" + (s.done ? " done" : ""));
+    const mark = el("i");
+    mark.innerHTML = svg("check");
+    row.append(mark, el("span", "", s.text));
+    if (interactive) row.onclick = () => {
+      tick();
+      row.classList.toggle("done");
+      update(t, { subtasks: t.subtasks.map((x, j) => j === i ? { ...x, done: !x.done } : x) });
+    };
+    box.append(row);
+  });
+  return box;
+}
+
+function taskCard(t, opts = {}) {
   const card = el("article", "card" + (t.done ? " done" : ""));
-  const when = el("div", "when");
-  when.append(el("b", "", t.start.slice(11, 16) || "весь"), el("small", "", t.start[10] ? "" : "день"));
+  catStyle(card, t.category);
+  const whenBox = el("div", "when");
+  whenBox.append(el("b", "", t.start.slice(11, 16) || tr("all_a")), el("small", "", t.start[10] ? "" : tr("all_b")));
   const content = el("div", "content");
   content.append(el("h3", "", t.title));
   if (t.description) content.append(el("p", "desc", t.description));
-  const tg_ = tags(t, false, clash);
-  if (tg_) content.append(tg_);
+  if (t.subtasks.length) content.append(subtaskList(t, true));
+  content.append(tags(t, opts));
   const actions = el("div", "card-actions");
-  const edit = withIcon("button", "act", "edit", "Изменить");
-  const del = withIcon("button", "act danger", "trash", "Удалить");
+  const edit = withIcon("button", "act", "edit", tr("edit"));
+  const del = withIcon("button", "act danger", "trash", tr("delete"));
   edit.onclick = () => openEditor(t);
   del.onclick = () => confirmDelete(t);
   actions.append(edit, del);
   content.append(actions);
   const check = withIcon("button", "check", "check");
-  check.setAttribute("aria-label", t.done ? "Вернуть в работу" : "Отметить выполненной");
-  check.onclick = () => {
-    haptic();
-    card.classList.toggle("done");
-    update(t, { done: !t.done });
-  };
-  card.append(when, content, check);
+  check.setAttribute("aria-label", tr("mark_done"));
+  check.onclick = () => { haptic(); card.classList.toggle("done"); update(t, { done: !t.done }); };
+  card.append(whenBox, content, check);
+  if (opts.onOpen) content.onclick = e => { if (!e.target.closest("button")) opts.onOpen(); };
   return card;
 }
 
 function pendingCard(t) {
   const card = el("article", "card pending");
+  catStyle(card, t.category);
   const content = el("div", "content");
   content.append(el("h3", "", t.title));
   if (t.description) content.append(el("p", "desc", t.description));
-  content.append(tags(t, true));
+  if (t.subtasks.length) content.append(subtaskList(t, false));
+  content.append(tags(t, { withDate: true }));
   const actions = el("div", "card-actions");
-  const yes = withIcon("button", "act primary", "check", "Добавить");
-  const edit = withIcon("button", "act", "edit", "Изменить");
+  const yes = withIcon("button", "act primary", "check", tr("add"));
+  const edit = withIcon("button", "act", "edit", tr("edit"));
   const no = withIcon("button", "act danger icon-only", "close");
-  no.setAttribute("aria-label", "Отклонить");
+  no.setAttribute("aria-label", tr("reject"));
   yes.onclick = () => { tg.HapticFeedback?.notificationOccurred("success"); update(t, { confirm: true }); };
   edit.onclick = () => openEditor(t);
-  no.onclick = () => { haptic(); update(t, { delete: true }); };
+  no.onclick = () => { haptic(); removeTask(t, true); };
   actions.append(yes, edit, no);
   content.append(actions);
   card.append(content);
@@ -486,44 +776,55 @@ function render() {
   const ok = tasks.filter(t => t.status === "ok");
   const pending = tasks.filter(t => t.status === "pending");
   renderCalendar(ok);
-
+  renderWeek();
   $("#inbox").hidden = !pending.length;
   $("#inbox-count").textContent = pending.length;
   $("#inbox-list").replaceChildren(...pending.map(pendingCard));
 
   const day = ok.filter(t => t.start.slice(0, 10) === selected);
   const done = day.filter(t => t.done).length;
-  const prefix = selected === TODAY ? "Сегодня, " : selected === TOMORROW ? "Завтра, " : "";
-  const full = fmtDay.format(asDate(selected));
-  $("#day-title").textContent = prefix ? prefix + full.split(", ")[1] : cap(full);
-  $("#day-sub").textContent = prefix ? cap(full.split(", ")[0]) : "";
-  if (day.length) $("#day-sub").textContent += (prefix ? " · " : "") +
-    `${day.length} ${plural(day.length, "задача", "задачи", "задач")}` + (done ? `, выполнено ${done}` : "");
+  const d = asDate(selected);
+  const rel = selected === TODAY ? tr("today") : selected === TOMORROW ? tr("tomorrow") : "";
+  $("#day-title").textContent = rel ? `${rel}, ${fmt({ day: "numeric", month: "long" }).format(d)}` : cap(fmt({ weekday: "long", day: "numeric", month: "long" }).format(d));
+  $("#day-sub").textContent = [rel && cap(fmt({ weekday: "long" }).format(d)),
+    day.length && count(day.length, "task") + (done ? `, ${tr("done_n", { n: done })}` : "")].filter(Boolean).join(" · ");
+  $("#plan-btn").hidden = selected < TODAY || !day.some(t => !t.start[10] && !t.done);
 
+  // Фильтр по категориям — когда в дне их больше одной.
+  const cats = [...new Set(day.map(t => t.category))];
+  if (!cats.includes(filter)) filter = "all";
+  const filters = $("#filters");
+  filters.hidden = cats.length < 2;
+  filters.replaceChildren(...["all", ...cats].map(c => {
+    const b = el("button", "filter" + (filter === c ? " on" : ""), c === "all" ? tr("all") : `${CAT_ICON[c] || "📌"} ${L[lang].cat[c] || c}`);
+    b.onclick = () => { tick(); filter = c; render(); };
+    return b;
+  }));
+
+  const shown = day.filter(t => filter === "all" || t.category === filter);
   const minutes = t => +t.start.slice(11, 13) * 60 + +t.start.slice(14, 16);
-  const clashWith = t => t.start[10] && !t.done && day.find(o => o !== t && o.start[10] && !o.done && Math.abs(minutes(o) - minutes(t)) < 60);
+  const clashWith = t => (t.start[10] && !t.done && day.find(o => o !== t && o.start[10] && !o.done && Math.abs(minutes(o) - minutes(t)) < 60)) || null;
   const list = $("#day-list");
-  list.replaceChildren(...day.map(t => taskCard(t, clashWith(t)?.start.slice(11, 16))));
+  list.replaceChildren(...shown.map(t => taskCard(t, { clash: clashWith(t)?.start.slice(11, 16) })));
   if (!day.length) {
     const e = el("div", "empty");
-    e.append(el("b", "", selected < TODAY ? "В этот день задач не было" : "Ничего не запланировано"),
-             el("p", "", "Перешли боту сообщение с делом, надиктуй голосовое или добавь задачу вручную."));
+    e.append(el("b", "", tr(selected < TODAY ? "empty_past" : "empty")), el("p", "", tr("empty_text")));
     list.append(e);
   }
 }
 
 /* ── Выбор напоминаний ─────────────────────────────── */
-function reminderPicker(box, selectedSet, onChange) {
+function reminderPicker(box, set, onChange) {
   box.replaceChildren();
   const chips = el("div", "chips");
-  for (const m of [...new Set([...PRESETS, ...selectedSet])].sort((a, b) => a - b)) {
-    const c = el("button", "chip" + (selectedSet.has(m) ? " on" : ""), chipLabel(m));
+  for (const m of [...new Set([...PRESETS, ...set])].sort((a, b) => a - b)) {
+    const c = el("button", "chip" + (set.has(m) ? " on" : ""), offsetLabel(m));
     c.onclick = () => {
       tick();
-      if (selectedSet.has(m)) selectedSet.delete(m);
-      else if (selectedSet.size < MAX_REMINDERS) selectedSet.add(m);
-      else return tg.showAlert(`Не больше ${MAX_REMINDERS} напоминаний.`);
-      reminderPicker(box, selectedSet, onChange);
+      if (set.has(m)) set.delete(m);
+      else if (set.size < MAX_REMINDERS) set.add(m);
+      else return tg.showAlert(tr("max_rem", { n: MAX_REMINDERS }));
+      reminderPicker(box, set, onChange);
       onChange?.();
     };
     chips.append(c);
@@ -531,25 +832,26 @@ function reminderPicker(box, selectedSet, onChange) {
   const custom = el("div", "custom");
   const num = Object.assign(el("input"), { type: "number", inputMode: "numeric", min: 1, value: 3 });
   const unit = el("select");
-  for (const [label, k] of [["мин", 1], ["ч", 60], ["дн", 1440]]) unit.append(Object.assign(el("option", "", label), { value: k }));
+  for (const [key, k] of [["u_min", 1], ["u_h", 60], ["u_d", 1440]]) unit.append(Object.assign(el("option", "", tr(key)), { value: k }));
   unit.value = 60;
-  const add = withIcon("button", "", "plus");
-  add.setAttribute("aria-label", "Добавить напоминание");
+  const add = withIcon("button", "plus", "plus");
+  add.setAttribute("aria-label", tr("add"));
   add.onclick = () => {
     const m = Math.round(+num.value * +unit.value);
-    if (!(m > 0 && m <= MAX_OFFSET)) return tg.showAlert("Можно от 1 минуты до 30 дней.");
-    if (selectedSet.size >= MAX_REMINDERS) return tg.showAlert(`Не больше ${MAX_REMINDERS} напоминаний.`);
+    if (!(m > 0 && m <= MAX_OFFSET)) return tg.showAlert(tr("rem_range"));
+    if (set.size >= MAX_REMINDERS) return tg.showAlert(tr("max_rem", { n: MAX_REMINDERS }));
     haptic();
-    selectedSet.add(m);
-    reminderPicker(box, selectedSet, onChange);
+    set.add(m);
+    reminderPicker(box, set, onChange);
     onChange?.();
   };
-  custom.append(el("span", "", "Своё: за"), num, unit, add);
+  custom.append(el("span", "", tr("custom")), num, unit, add);
   box.append(chips, custom);
 }
 
 /* ── Листы ─────────────────────────────────────────── */
 function showSheet(sheet) {
+  if (current && current !== sheet) current.classList.remove("open");
   current = sheet;
   sheet.classList.add("open");
   tg.BackButton.show();
@@ -569,9 +871,40 @@ function toggleAllDay() {
   $("#f-when").classList.toggle("single", allDay);
 }
 
+function renderEditorBits() {
+  $("#f-cats").replaceChildren(...CATS.map(c => {
+    const b = el("button", "chip cat" + (editCat === c ? " on" : ""), `${CAT_ICON[c]} ${L[lang].cat[c]}`);
+    catStyle(b, c);
+    b.onclick = () => { tick(); editCat = c; renderEditorBits(); };
+    return b;
+  }));
+  $("#f-prio").replaceChildren(...["high", "normal", "low"].map(p => {
+    const b = el("button", (editPrio === p ? "on " : "") + p, L[lang].prio[p]);
+    b.onclick = () => { tick(); editPrio = p; renderEditorBits(); };
+    return b;
+  }));
+  $("#f-subs").replaceChildren(...editSubs.map((s, i) => {
+    const row = el("div", "sub-row");
+    const rm = withIcon("button", "", "close");
+    rm.setAttribute("aria-label", tr("delete"));
+    rm.onclick = () => { tick(); editSubs.splice(i, 1); renderEditorBits(); };
+    row.append(el("span", "", s.text), rm);
+    return row;
+  }));
+}
+
+function addSubtask() {
+  const input = $("#f-sub-input"), text = input.value.trim();
+  if (!text || editSubs.length >= MAX_SUBTASKS) return;
+  haptic();
+  editSubs.push({ text, done: false });
+  input.value = "";
+  renderEditorBits();
+}
+
 function openEditor(t) {
   editing = t;  // null — новая задача
-  $("#ed-heading").textContent = t ? "Задача" : "Новая задача";
+  $("#ed-heading").textContent = tr(t ? "task" : "new_task");
   $("#f-title").value = t?.title ?? "";
   $("#f-desc").value = t?.description ?? "";
   $("#f-loc").value = t?.location ?? "";
@@ -579,9 +912,14 @@ function openEditor(t) {
   $("#f-time").value = t?.start[10] ? t.start.slice(11, 16) : "10:00";
   $("#f-allday").checked = !!t && !t.start[10];
   toggleAllDay();
-  $("#f-delete").hidden = !t;
   $("#f-repeat").value = t?.repeat ?? "";
   $("#f-repeat-hint").hidden = !t?.series;
+  $("#f-delete").hidden = !t;
+  $("#f-sub-input").value = "";
+  editCat = t?.category ?? (filter !== "all" ? filter : "other");
+  editPrio = t?.priority ?? "normal";
+  editSubs = (t?.subtasks ?? []).map(s => ({ ...s }));
+  renderEditorBits();
   editReminders.clear();
   (t ? t.reminders : settings.reminders).forEach(m => editReminders.add(m));
   reminderPicker($("#f-reminders"), editReminders);
@@ -590,11 +928,12 @@ function openEditor(t) {
 }
 
 async function saveEditor() {
+  addSubtask();  // недописанный пункт тоже сохраняем
   const title = $("#f-title").value.trim(), date = $("#f-date").value, time = $("#f-time").value;
-  if (!title || !date) return tg.showAlert("Укажи название и дату.");
+  if (!title || !date) return tg.showAlert(tr("need_title"));
   const start = $("#f-allday").checked || !time ? date : `${date}T${time}`;
   const body = { title, start, description: $("#f-desc").value.trim(), location: $("#f-loc").value.trim(),
-                 reminders: [...editReminders], repeat: $("#f-repeat").value };
+                 reminders: [...editReminders], repeat: $("#f-repeat").value, category: editCat, priority: editPrio, subtasks: editSubs };
   const t = editing;
   hideSheet();
   selected = date;
@@ -602,24 +941,90 @@ async function saveEditor() {
   if (await save(t ? `api/tasks/${t.id}` : "api/tasks", body)) tg.HapticFeedback?.notificationOccurred("success");
 }
 
-function confirmDelete(t) {
-  const remove = how => {
-    hideSheet();
-    haptic("medium");
-    update(t, { delete: how });
-  };
-  if (!t.series) return tg.showConfirm(`Удалить «${t.title}»?`, yes => yes && remove(true));
-  tg.showPopup({
-    title: "Повторяющаяся задача",
-    message: `Удалить «${t.title}»?`,
-    buttons: [
-      { id: "one", type: "default", text: "Только эту" },
-      { id: "series", type: "destructive", text: "Эту и все следующие" },
-      { type: "cancel" },
-    ],
-  }, id => id && remove(id === "series" ? "series" : true));
+/* ── Удаление и «Отменить» ─────────────────────────── */
+let toastTimer = null, undoBatch = null;
+function toast(text, batch) {
+  undoBatch = batch;
+  $("#toast-text").textContent = text;
+  $("#toast").classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $("#toast").classList.remove("show"), 5000);
+}
+$("#toast-undo").onclick = async () => {
+  $("#toast").classList.remove("show");
+  if (!undoBatch) return;
+  haptic();
+  const batch = undoBatch;
+  undoBatch = null;
+  await save("api/undo", { batch });
+};
+
+async function removeTask(t, how) {
+  hideSheet();
+  const res = await save(`api/tasks/${t.id}`, { delete: how });
+  if (res?.undo) toast(tr(how === "series" ? "deleted_series" : "deleted"), res.undo);
 }
 
+function confirmDelete(t) {
+  if (!t.series) return tg.showConfirm(tr("delete_q", { t: t.title }), yes => { if (yes) { haptic("medium"); removeTask(t, true); } });
+  tg.showPopup({
+    title: tr("series_title"),
+    message: tr("delete_q", { t: t.title }),
+    buttons: [{ id: "one", type: "default", text: tr("only_this") }, { id: "series", type: "destructive", text: tr("this_and_next") }, { type: "cancel" }],
+  }, id => { if (id === "one" || id === "series") { haptic("medium"); removeTask(t, id === "series" ? "series" : true); } });
+}
+
+/* ── Поиск ─────────────────────────────────────────── */
+let searchTimer = null;
+function openSearch() {
+  $("#q").value = "";
+  $("#results").replaceChildren(el("p", "loading", tr("type_more")));
+  showSheet($("#search"));
+  setTimeout(() => $("#q").focus(), 300);
+}
+$("#q").oninput = () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(async () => {
+    const q = $("#q").value.trim(), box = $("#results");
+    if (q.length < 2) return box.replaceChildren(el("p", "loading", tr("type_more")));
+    try {
+      const { tasks: found } = await api(`api/search?q=${encodeURIComponent(q)}`);
+      box.replaceChildren(...found.map(t => t.status === "pending" ? pendingCard(t)
+        : taskCard(t, { withDate: true, onOpen: () => { hideSheet(); select(t.start.slice(0, 10)); } })));
+      if (!found.length) box.append(el("p", "loading", tr("nothing")));
+    } catch { box.replaceChildren(el("p", "loading", tr("save_failed"))); }
+  }, 250);
+};
+
+/* ── План дня ──────────────────────────────────────── */
+async function openPlanner() {
+  haptic();
+  planItems = [];
+  $("#plan-list").replaceChildren(el("p", "loading", tr("planning")));
+  $("#plan-comment").textContent = "";
+  $("#plan-apply").disabled = true;
+  showSheet($("#planner"));
+  try {
+    const { items, comment } = await api("api/plan", { date: selected });
+    planItems = items;
+    if (!items.length) return $("#plan-list").replaceChildren(el("p", "loading", tr("plan_nothing")));
+    $("#plan-list").replaceChildren(...items.map(i => {
+      const row = el("div", "plan-row");
+      const start = new Date(i.start), end = new Date(start.getTime() + i.minutes * 60000);
+      row.append(el("b", "", `${pad(start.getHours())}:${pad(start.getMinutes())}–${pad(end.getHours())}:${pad(end.getMinutes())}`), el("span", "", i.title));
+      return row;
+    }));
+    $("#plan-comment").textContent = comment;
+    $("#plan-apply").disabled = false;
+  } catch { $("#plan-list").replaceChildren(el("p", "loading", tr("plan_failed"))); }
+}
+$("#plan-apply").onclick = async () => {
+  hideSheet();
+  if (await save("api/plan/apply", { items: planItems.map(i => ({ id: i.id, start: i.start })) }))
+    tg.HapticFeedback?.notificationOccurred("success");
+};
+
+/* ── Настройки ─────────────────────────────────────── */
 function openSettings() {
   defaultReminders.clear();
   settings.reminders.forEach(m => defaultReminders.add(m));
@@ -627,31 +1032,67 @@ function openSettings() {
   $("#s-digest").value = settings.digest_hour ?? "";
   $("#s-evening").value = settings.evening_hour ?? "";
   $("#s-smart").checked = settings.smart_reminders;
+  $("#s-lang").value = lang;
   showSheet($("#settings"));
 }
 
 async function saveSettings(body) {
   try { await api("api/settings", body); Object.assign(settings, body); }
-  catch { tg.showAlert("Не получилось сохранить настройки."); }
+  catch { tg.showAlert(tr("save_failed")); }
+}
+
+$("#s-digest").onchange = e => saveSettings({ digest_hour: e.target.value === "" ? null : +e.target.value });
+$("#s-evening").onchange = e => saveSettings({ evening_hour: e.target.value === "" ? null : +e.target.value });
+$("#s-smart").onchange = e => saveSettings({ smart_reminders: e.target.checked });
+$("#s-lang").onchange = async e => {
+  lang = e.target.value;
+  await saveSettings({ lang });
+  applyLang();
+  render();
+  openSettings();
+};
+
+/* ── Знакомство ────────────────────────────────────── */
+const SLIDE_ICONS = ["message", "calendar", "sparkles"];
+let slide = 0;
+function renderSlide() {
+  const [title, text] = L[lang].slides[slide];
+  $("#slide-icon").innerHTML = svg(SLIDE_ICONS[slide]);
+  $("#slide-title").textContent = title;
+  $("#slide-text").textContent = text;
+  [...$("#onboard-dots").children].forEach((d, i) => d.classList.toggle("on", i === slide));
+  $("#onboard-next").textContent = tr(slide === 2 ? "start" : "next_btn");
+}
+function finishOnboarding() {
+  tick();
+  $("#onboard").hidden = true;
+  try { tg.CloudStorage.setItem("onboarded", "1"); } catch {}
+  try { localStorage.setItem("onboarded", "1"); } catch {}
+}
+$("#onboard-next").onclick = () => { if (slide === 2) return finishOnboarding(); tick(); slide++; renderSlide(); };
+$("#onboard-skip").onclick = finishOnboarding;
+function maybeOnboard() {
+  const show = () => { slide = 0; renderSlide(); $("#onboard").hidden = false; };
+  try { if (localStorage.getItem("onboarded")) return; } catch {}
+  try { tg.CloudStorage.getItem("onboarded", (err, value) => { if (err || !value) show(); }); } catch { show(); }
 }
 
 /* ── Обработчики ───────────────────────────────────── */
-$("#gear").innerHTML = svg("gear");
-$("#prev").innerHTML = svg("left");
-$("#next").innerHTML = svg("right");
-$("#add").innerHTML = svg("plus");
-$("#add").append("Задача");
-document.querySelectorAll("[data-close]").forEach(b => { b.innerHTML = svg("close"); b.onclick = hideSheet; });
+document.querySelectorAll("[data-icon]").forEach(n => { n.innerHTML = svg(n.dataset.icon); });
+document.querySelectorAll("[data-close]").forEach(b => b.onclick = hideSheet);
 document.querySelectorAll(".sheet").forEach(s => s.addEventListener("click", e => { if (e.target === s) hideSheet(); }));
-
 $("#prev").onclick = () => goMonth(-1);
 $("#next").onclick = () => goMonth(1);
 $("#to-today").onclick = () => select(TODAY);
 $("#gear").onclick = openSettings;
+$("#search-btn").onclick = openSearch;
 $("#add").onclick = () => openEditor(null);
+$("#plan-btn").onclick = openPlanner;
 $("#f-allday").onchange = toggleAllDay;
 $("#f-save").onclick = saveEditor;
 $("#f-delete").onclick = () => editing && confirmDelete(editing);
+$("#f-sub-add").onclick = addSubtask;
+$("#f-sub-input").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); addSubtask(); } };
 
 let touchX = null;  // свайп по календарю листает месяцы
 $("#grid").addEventListener("touchstart", e => { touchX = e.touches[0].clientX; }, { passive: true });
@@ -660,22 +1101,10 @@ $("#grid").addEventListener("touchend", e => {
   if (Math.abs(dx) > 60) goMonth(dx < 0 ? 1 : -1);
 });
 
-function hourSelect(select, key, from, to) {
-  select.append(Object.assign(el("option", "", "Не присылать"), { value: "" }));
-  for (let h = from; h <= to; h++) select.append(Object.assign(el("option", "", `Каждый день в ${h}:00`), { value: h }));
-  select.onchange = () => saveSettings({ [key]: select.value === "" ? null : +select.value });
-}
-hourSelect($("#s-digest"), "digest_hour", 5, 12);
-hourSelect($("#s-evening"), "evening_hour", 17, 23);
-$("#s-smart").onchange = e => saveSettings({ smart_reminders: e.target.checked });
-for (const [k, label] of Object.entries(REPEATS)) $("#f-repeat").append(Object.assign(el("option", "", label), { value: k }));
-
 document.querySelectorAll("[data-cal]").forEach(b => b.onclick = () => {
   const kind = b.dataset.cal;
   if (kind !== "url") return tg.openLink(calendar[kind]);
-  navigator.clipboard.writeText(calendar.url)
-    .then(() => tg.showAlert("Ссылка скопирована. Добавь её в календаре как подписку по URL."))
-    .catch(() => tg.showAlert(calendar.url));
+  navigator.clipboard.writeText(calendar.url).then(() => tg.showAlert(tr("copied"))).catch(() => tg.showAlert(calendar.url));
 });
 
 tg.BackButton.onClick(hideSheet);
@@ -683,6 +1112,7 @@ tg.SettingsButton?.show();
 tg.SettingsButton?.onClick(() => { hideSheet(); openSettings(); });
 tg.onEvent("themeChanged", applyTheme);
 applyTheme();
+applyLang();
 
 // Ссылки из бота: ?task=ID&date=YYYY-MM-DD — открыть задачу, ?view=settings — настройки.
 const params = new URLSearchParams(location.search);
@@ -694,12 +1124,13 @@ load()
   .then(() => {
     const t = tasks.find(t => t.id === +params.get("task"));
     if (t) openEditor(t);
-    if (params.get("view") === "settings") openSettings();
+    else if (params.get("view") === "settings") openSettings();
+    else maybeOnboard();
   })
   .catch(() => {
     document.body.replaceChildren();
     const e = el("div", "fatal");
-    e.append(el("b", "", "Открой календарь из Telegram"), el("p", "", "Он работает внутри бота — кнопка «Календарь» в чате."));
+    e.append(el("b", "", tr("fatal")), el("p", "", tr("fatal_text")));
     document.body.append(e);
   });
 </script>
