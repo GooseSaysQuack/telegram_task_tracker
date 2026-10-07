@@ -591,6 +591,13 @@ async def set_menu(bot: Bot | None, uid: int, lang: str) -> None:
             logging.info("menu %s: %s", uid, e)
 
 
+LANG_BUTTONS = (("ru", "🇷🇺 Русский"), ("en", "🇬🇧 English"), ("ky", "🇰🇬 Кыргызча"))
+
+
+def lang_row() -> list[InlineKeyboardButton]:
+    return [InlineKeyboardButton(text=label, callback_data=f"lang:{code}") for code, label in LANG_BUTTONS]
+
+
 def start_button(lang: str, bot_username: str) -> list[InlineKeyboardButton]:
     return [InlineKeyboardButton(text=t(lang, "btn_get_tasks"), url=f"https://t.me/{bot_username}?start=group")]
 
@@ -943,7 +950,31 @@ async def start(m: Message):
     await set_menu(m.bot, m.from_user.id, lang)
     name = escape(m.from_user.first_name or "")
     await m.answer(t(lang, "help", name=f", {name}" if name else "", bot=me.username), parse_mode="HTML",
-                   reply_markup=keyboard(app_button(lang)))
+                   reply_markup=keyboard(app_button(lang), lang_row()))
+
+
+@dp.message(Command("language"), F.chat.type == "private")
+async def language(m: Message):
+    lang = register(m.from_user.id, m.from_user.language_code)
+    await m.answer(t(lang, "language_text"), reply_markup=keyboard(lang_row()))
+
+
+@dp.callback_query(F.data.regexp(r"^lang:(ru|en|ky)$"))
+async def choose_language(c: CallbackQuery):
+    """Кнопки языка под приветствием и в /language: сохраняем и показываем подсказку уже на новом языке."""
+    uid, lang = c.from_user.id, c.data[5:]
+    register(uid, c.from_user.language_code)
+    db.execute("UPDATE users SET lang = ? WHERE id = ?", (lang, uid))
+    db.commit()
+    await set_menu(c.bot, uid, lang)
+    await c.answer(t(lang, "lang_saved"))
+    me = await c.bot.me()
+    name = escape(c.from_user.first_name or "")
+    try:
+        await c.message.edit_text(t(lang, "help", name=f", {name}" if name else "", bot=me.username), parse_mode="HTML",
+                                  reply_markup=keyboard(app_button(lang), lang_row()))
+    except TelegramAPIError:  # тот же язык — текст не изменился
+        pass
 
 
 @dp.message(Command("settings"), F.chat.type == "private")
@@ -1031,10 +1062,10 @@ async def private(m: Message):
 async def group_help(m: Message):
     lang = texts.lang_from_code(m.from_user.language_code)
     me = await m.bot.me()
-    await m.reply(t(lang, "group_help"), reply_markup=keyboard(start_button(lang, me.username)))
+    await m.reply(t(lang, "group_help", bot=me.username), reply_markup=keyboard(start_button(lang, me.username)))
 
 
-@dp.message(Command("today", "tasks", "plan", "week", "settings", "calendar"), GROUP)
+@dp.message(Command("today", "tasks", "plan", "week", "settings", "calendar", "language"), GROUP)
 async def group_private_only(m: Message):
     lang = texts.lang_from_code(m.from_user.language_code)
     me = await m.bot.me()
@@ -1043,19 +1074,24 @@ async def group_private_only(m: Message):
 
 @dp.message(Command("task"), GROUP)
 async def group_task(m: Message):
-    """/task ответом на сообщение: явная просьба разобрать его (в т.ч. голосовое или фото). Задача — только автору команды."""
+    """/task ответом на сообщение: явная просьба разобрать его (в т.ч. голосовое или фото)."""
+    if not m.reply_to_message:
+        await m.reply(t(texts.lang_from_code(m.from_user.language_code), "task_need_reply"))
+        return
+    await task_from(m, m.reply_to_message.as_(m.bot))
+
+
+async def task_from(m: Message, target: Message) -> None:
+    """Разобрать одно сообщение по просьбе участника (/task или @бот). Задача — только тому, кто попросил."""
     uid = m.from_user.id
     lang = texts.lang_from_code(m.from_user.language_code)
     me = await m.bot.me()
-    if not (target := m.reply_to_message):
-        await m.reply(t(lang, "task_need_reply"))
-        return
     if not is_user(uid):
         await m.reply(t(lang, "start_first"), reply_markup=keyboard(start_button(lang, me.username)))
         return
     lang = lang_of(uid)
     mode = f"Пользователь попросил сделать задачу из сообщения в групповом чате «{m.chat.title or ''}»."
-    text, ref, parts = await message_input(target.as_(m.bot))
+    text, ref, parts = await message_input(target)
     if (res := await analyze(text, ref, parts, mode, user_context(uid), lang)) is None:
         await m.reply(t(lang, "ai_failed"))
         return
@@ -1078,11 +1114,20 @@ async def added_to_group(event: ChatMemberUpdated):
     text = t(lang, "group_welcome")
     if not me.can_read_all_group_messages and event.new_chat_member.status != "administrator":
         text += "\n\n" + t(lang, "group_privacy")
-    await event.answer(text + "\n\n" + t(lang, "group_voice"), reply_markup=keyboard(start_button(lang, me.username)))
+    await event.answer(text + "\n\n" + t(lang, "group_voice", bot=me.username), reply_markup=keyboard(start_button(lang, me.username)))
 
 
 @dp.message(GROUP, F.text | F.caption)
 async def group(m: Message):
+    me = await m.bot.me()
+    if f"@{me.username}".lower() in (m.text or m.caption).lower():  # бота отметили — явная просьба
+        if m.reply_to_message:
+            await task_from(m, m.reply_to_message.as_(m.bot))
+        elif re.sub(f"@{re.escape(me.username)}", "", m.text or m.caption, flags=re.I).strip():
+            await task_from(m, m)
+        else:
+            await group_help(m)
+        return
     if not HINT.search(m.text or m.caption):
         return
     mode = f"Сообщение из группового чата «{m.chat.title or ''}». В списке — дела, уже найденные в этом чате."
@@ -1649,7 +1694,7 @@ async def setup_profile(bot: Bot) -> None:
     for lang in LANGS:
         code = None if lang == "ru" else lang
         await bot.set_my_commands([BotCommand(command=c, description=t(lang, f"cmd_{c}"))
-                                   for c in ("today", "tasks", "plan", "week", "settings", "calendar", "help")],
+                                   for c in ("today", "tasks", "plan", "week", "settings", "calendar", "language", "help")],
                                   language_code=code)
         await bot.set_my_commands([BotCommand(command="task", description=t(lang, "cmd_task")),
                                    BotCommand(command="help", description=t(lang, "cmd_group_help"))],

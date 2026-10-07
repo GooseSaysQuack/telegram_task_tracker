@@ -111,7 +111,7 @@ T = {
             "🎙 Надиктуй голосовое: «завтра в 10 стоматолог»\n"
             "📸 Пришли скриншот переписки, афишу или билет\n"
             "👥 Добавь меня в рабочий чат — замечу новые дела и переносы\n"
-            "↗️ В любом чате набери @{bot} — и поделись встречей с собеседником\n\n"
+            "↗️ В любом чате набери @{bot} и пробел — выбери задачу и поделись ею с собеседником\n\n"
             "<b>Можно просто написать</b>\n"
             "• «что у меня завтра?», «когда я свободен в четверг?»\n"
             "• «перенеси встречу с Мишей на субботу», «отмени стоматолога»\n"
@@ -120,7 +120,7 @@ T = {
             "<b>Команды</b>\n"
             "/today — задачи на сегодня\n/tasks — ближайшие задачи\n/plan — ИИ спланирует день\n"
             "/week — продуктивность и обзор недели\n/settings — напоминания, язык, утро и вечер\n"
-            "/calendar — показывать задачи в календаре телефона\n/help — эта подсказка"
+            "/calendar — показывать задачи в календаре телефона\n/language — сменить язык\n/help — эта подсказка"
         ),
         "settings_text": "Напоминания, язык, утренний план и вечерний итог — всё в настройках:",
         "btn_settings": "⚙️ Открыть настройки",
@@ -131,14 +131,14 @@ T = {
         "doc_unsupported": "Пришли текст, голосовое, фото или скриншот — файлы других типов я не читаю.",
         "ai_failed": "Не получилось разобрать, попробуй позже.",
         "nothing_found": "Не нашёл тут дел. Можно спросить: «что у меня завтра?» или «перенеси встречу на субботу».",
-        "group_help": "Я замечаю в этом чате встречи, дедлайны и переносы и присылаю их в личку тем, кто запустил меня. В чат я ничего не пишу.\n\n🎙 Голосовые и фото сам не разбираю. Ответь на такое сообщение командой /task — и я пришлю задачу тебе в личку.",
+        "group_help": "Я замечаю в этом чате встречи, дедлайны и переносы и присылаю их в личку тем, кто запустил меня. В чат я ничего не пишу.\n\n🏷 Отметь меня — @{bot} — в ответ на сообщение, голосовое или фото, или напиши «@{bot} завтра в 10 созвон», и я пришлю задачу тебе в личку. /task делает то же самое.",
         "private_only": "Эта команда работает в личке — там твои задачи не видны другим.",
         "task_need_reply": "Ответь командой /task на сообщение, голосовое или фото — и я сделаю из него задачу.",
         "start_first": "Сначала нажми «Старт» у меня в личке — туда придёт задача.",
         "nothing_here": "Не нашёл тут дела.",
         "group_welcome": "👋 Привет! Я замечаю в этом чате встречи, дедлайны и переносы и присылаю их в личку — тем, кто запустил меня. Здесь я молчу.\n\nЧтобы получать задачи из этого чата — нажмите кнопку ниже и «Старт».",
         "group_privacy": "⚠️ Сейчас я не вижу сообщений чата. Сделайте меня администратором или отключите режим приватности в @BotFather (/setprivacy → Disable) и добавьте меня заново.",
-        "group_voice": "🎙 Голосовое или фото — ответьте на него командой /task.",
+        "group_voice": "🏷 Отметьте меня — @{bot} — в ответ на сообщение, голосовое или фото, или напишите «@{bot} завтра в 10 созвон», и я пришлю задачу вам в личку.",
         "btn_get_tasks": "🚀 Получать задачи в личку",
         "handled": "Уже обработано", "saved": "Сохранено",
         "btn_add": "✅ Добавить", "btn_apply": "✅ Применить", "btn_edit": "✏️ Изменить и настроить напоминания",
@@ -174,7 +174,8 @@ T = {
         ),
         "cmd_today": "Задачи на сегодня", "cmd_tasks": "Ближайшие задачи", "cmd_plan": "ИИ спланирует день",
         "cmd_week": "Продуктивность и обзор недели", "cmd_settings": "Напоминания, язык, утро и вечер",
-        "cmd_calendar": "Задачи в календаре телефона", "cmd_help": "Что умеет бот",
+        "cmd_calendar": "Задачи в календаре телефона", "cmd_help": "Что умеет бот", "cmd_language": "Сменить язык",
+        "language_text": "Выбери язык:", "lang_saved": "✅ Язык изменён",
         "cmd_task": "Ответом на сообщение, голосовое или фото — сделать задачу", "cmd_group_help": "Как я работаю в чате",
     },
     "en": {
@@ -189,7 +190,7 @@ T = {
             "🎙 Send a voice note: “dentist tomorrow at 10”\n"
             "📸 Send a chat screenshot, a poster or a ticket\n"
             "👥 Add me to a work chat — I'll catch new tasks and reschedules\n"
-            "↗️ Type @{bot} in any chat to share a meeting\n\n"
+            "↗️ In any chat type @{bot} and a space — pick a task and share it\n\n"
             "<b>Just ask</b>\n"
             "• “what do I have tomorrow?”, “when am I free on Thursday?”\n"
             "• “move the meeting with Mike to Saturday”, “cancel the dentist”\n"
@@ -198,7 +199,7 @@ T = {
             "<b>Commands</b>\n"
             "/today — today's tasks\n/tasks — upcoming tasks\n/plan — let AI plan your day\n"
             "/week — weekly productivity and review\n/settings — reminders, language, morning and evening\n"
-            "/calendar — show tasks in your phone calendar\n/help — this help"
+            "/calendar — show tasks in your phone calendar\n/language — change language\n/help — this help"
         ),
         "settings_text": "Reminders, language, morning plan and evening wrap-up — all in settings:",
         "btn_settings": "⚙️ Open settings",
@@ -209,14 +210,14 @@ T = {
         "doc_unsupported": "Send text, a voice note, a photo or a screenshot — I can't read other files.",
         "ai_failed": "Couldn't process that, please try again later.",
         "nothing_found": "No tasks found here. You can ask: “what do I have tomorrow?” or “move the meeting to Saturday”.",
-        "group_help": "I notice meetings, deadlines and reschedules in this chat and send them privately to those who started me. I don't post in the chat.\n\n🎙 I don't process voice notes and photos on my own. Reply to one with /task and I'll send you the task privately.",
+        "group_help": "I notice meetings, deadlines and reschedules in this chat and send them privately to those who started me. I don't post in the chat.\n\n🏷 Tag me — @{bot} — in a reply to a message, voice note or photo, or write “@{bot} call tomorrow at 10”, and I'll send you the task privately. /task does the same.",
         "private_only": "This command works in a private chat — your tasks stay private there.",
         "task_need_reply": "Reply with /task to a message, voice note or photo and I'll turn it into a task.",
         "start_first": "First press “Start” in a private chat with me — the task will arrive there.",
         "nothing_here": "No task found here.",
         "group_welcome": "👋 Hi! I notice meetings, deadlines and reschedules in this chat and send them privately to those who started me. I stay quiet here.\n\nTo get tasks from this chat, press the button below and “Start”.",
         "group_privacy": "⚠️ I can't see chat messages right now. Make me an admin, or disable privacy mode in @BotFather (/setprivacy → Disable) and add me again.",
-        "group_voice": "🎙 Voice note or photo — reply to it with /task.",
+        "group_voice": "🏷 Tag me — @{bot} — in a reply to a message, voice note or photo, or write “@{bot} call tomorrow at 10”, and I'll send you the task privately.",
         "btn_get_tasks": "🚀 Get tasks privately",
         "handled": "Already handled", "saved": "Saved",
         "btn_add": "✅ Add", "btn_apply": "✅ Apply", "btn_edit": "✏️ Edit and set reminders",
@@ -252,7 +253,8 @@ T = {
         ),
         "cmd_today": "Today's tasks", "cmd_tasks": "Upcoming tasks", "cmd_plan": "Let AI plan my day",
         "cmd_week": "Weekly productivity and review", "cmd_settings": "Reminders, language, morning and evening",
-        "cmd_calendar": "Tasks in your phone calendar", "cmd_help": "What the bot can do",
+        "cmd_calendar": "Tasks in your phone calendar", "cmd_help": "What the bot can do", "cmd_language": "Change language",
+        "language_text": "Choose your language:", "lang_saved": "✅ Language changed",
         "cmd_task": "Reply to a message, voice note or photo to make a task", "cmd_group_help": "How I work in this chat",
     },
     "ky": {
@@ -267,7 +269,7 @@ T = {
             "🎙 Үн билдирүү жазыңыз: «эртең саат 10до тиш доктур»\n"
             "📸 Сүйлөшүүнүн скриншотун, афишаны же билетти жөнөтүңүз\n"
             "👥 Мени жумуш чатына кошуңуз — жаңы иштерди жана жылдырууларды байкайм\n"
-            "↗️ Каалаган чатта @{bot} деп жазып, жолугушууну бөлүшүңүз\n\n"
+            "↗️ Каалаган чатта @{bot} жана боштук жазып, тапшырманы тандап бөлүшүңүз\n\n"
             "<b>Жөн эле жазыңыз</b>\n"
             "• «эртең менде эмне бар?», «бейшембиде качан бошмун?»\n"
             "• «Миша менен жолугушууну ишембиге жылдыр», «тиш доктурду жокко чыгар»\n"
@@ -276,7 +278,7 @@ T = {
             "<b>Буйруктар</b>\n"
             "/today — бүгүнкү иштер\n/tasks — жакынкы иштер\n/plan — ЖИ күнүңүздү пландайт\n"
             "/week — жуманын натыйжалуулугу жана сереби\n/settings — эскертмелер, тил, эртең жана кеч\n"
-            "/calendar — иштерди телефондун календарында көрсөтүү\n/help — ушул жардам"
+            "/calendar — иштерди телефондун календарында көрсөтүү\n/language — тилди өзгөртүү\n/help — ушул жардам"
         ),
         "settings_text": "Эскертмелер, тил, эртең мененки план жана кечки жыйынтык — баары жөндөөлөрдө:",
         "btn_settings": "⚙️ Жөндөөлөрдү ачуу",
@@ -287,14 +289,14 @@ T = {
         "doc_unsupported": "Текст, үн билдирүү, сүрөт же скриншот жөнөтүңүз — башка файлдарды окубайм.",
         "ai_failed": "Түшүнө алган жокмун, кийинчерээк кайталаңыз.",
         "nothing_found": "Бул жерден иш тапкан жокмун. Мындай сурасаңыз болот: «эртең менде эмне бар?» же «жолугушууну ишембиге жылдыр».",
-        "group_help": "Мен бул чаттагы жолугушууларды, мөөнөттөрдү жана жылдырууларды байкап, мени иштеткендерге жеке жөнөтөм. Чатка эч нерсе жазбайм.\n\n🎙 Үн билдирүүлөрдү жана сүрөттөрдү өзүм талдабайм. Ага /task буйругу менен жооп бериңиз — тапшырманы сизге жеке жөнөтөм.",
+        "group_help": "Мен бул чаттагы жолугушууларды, мөөнөттөрдү жана жылдырууларды байкап, мени иштеткендерге жеке жөнөтөм. Чатка эч нерсе жазбайм.\n\n🏷 Билдирүүгө, үнгө же сүрөткө жооп катары мени белгилеңиз — @{bot} — же «@{bot} эртең саат 10до чалуу» деп жазыңыз, тапшырманы сизге жеке жөнөтөм. /task да ушундай иштейт.",
         "private_only": "Бул буйрук жеке чатта иштейт — ал жерде иштериңизди башкалар көрбөйт.",
         "task_need_reply": "Билдирүүгө, үн билдирүүгө же сүрөткө /task буйругу менен жооп бериңиз — андан тапшырма жасайм.",
         "start_first": "Адегенде мага жеке чатта «Старт» басыңыз — тапшырма ошол жакка келет.",
         "nothing_here": "Бул жерден иш тапкан жокмун.",
         "group_welcome": "👋 Салам! Мен бул чаттагы жолугушууларды, мөөнөттөрдү жана жылдырууларды байкап, мени иштеткендерге жеке жөнөтөм. Бул жерде унчукпайм.\n\nБул чаттан тапшырмаларды алуу үчүн төмөнкү баскычты жана «Старт» басыңыз.",
         "group_privacy": "⚠️ Азыр чаттын билдирүүлөрүн көрбөйм. Мени администратор кылыңыз же @BotFather'де купуялуулук режимин өчүрүңүз (/setprivacy → Disable) жана кайра кошуңуз.",
-        "group_voice": "🎙 Үн билдирүү же сүрөт — ага /task буйругу менен жооп бериңиз.",
+        "group_voice": "🏷 Билдирүүгө, үнгө же сүрөткө жооп катары мени белгилеңиз — @{bot} — же «@{bot} эртең саат 10до чалуу» деп жазыңыз, тапшырманы сизге жеке жөнөтөм.",
         "btn_get_tasks": "🚀 Тапшырмаларды жеке алуу",
         "handled": "Буга чейин иштетилген", "saved": "Сакталды",
         "btn_add": "✅ Кошуу", "btn_apply": "✅ Колдонуу", "btn_edit": "✏️ Өзгөртүү жана эскертмелер",
@@ -330,7 +332,8 @@ T = {
         ),
         "cmd_today": "Бүгүнкү иштер", "cmd_tasks": "Жакынкы иштер", "cmd_plan": "ЖИ күнүңүздү пландайт",
         "cmd_week": "Жуманын натыйжалуулугу жана сереби", "cmd_settings": "Эскертмелер, тил, эртең жана кеч",
-        "cmd_calendar": "Телефондун календарындагы иштер", "cmd_help": "Бот эмне кыла алат",
+        "cmd_calendar": "Телефондун календарындагы иштер", "cmd_help": "Бот эмне кыла алат", "cmd_language": "Тилди өзгөртүү",
+        "language_text": "Тилди тандаңыз:", "lang_saved": "✅ Тил өзгөртүлдү",
         "cmd_task": "Билдирүүгө, үнгө же сүрөткө жооп берип тапшырма жасоо", "cmd_group_help": "Чатта кантип иштейм",
     },
 }

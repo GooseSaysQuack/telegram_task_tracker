@@ -74,6 +74,9 @@ class FakeBot:
     async def me(self):
         return NS(username="tracker_bot")
 
+    async def set_chat_menu_button(self, **kw):
+        self.menu = kw
+
 
 def run(fn, *args):
     b = FakeBot()
@@ -97,7 +100,7 @@ async def press(handler, data, uid, html=""):
     answers = []
     async def answer(text=None, **kw): answers.append(text)
     msg.edit_text, msg.edit_reply_markup, msg.delete = edit_text, edit_reply_markup, delete
-    await handler(NS(data=data, from_user=NS(id=uid, language_code="ru"), message=msg, answer=answer, bot=FakeBot()))
+    await handler(NS(data=data, from_user=NS(id=uid, language_code="ru", first_name="Даня"), message=msg, answer=answer, bot=FakeBot()))
     return msg.edited, answers
 
 
@@ -282,6 +285,36 @@ assert any(uid == 10 and "не отмечено 2 дела" in text for uid, tex
 asyncio.run(press(bot.evening_action, "ev:mv:2030-03-05", 10))
 assert sorted(s for (s,) in db.execute("SELECT start FROM tasks WHERE user_id = 10 AND title IN ('Купить хлеб', 'Позвонить маме')")) == [
     "2030-03-06", "2030-03-06T18:00"]
+
+# ── @бот в группе: подсказка, разбор ответа (голосовое) или текста после упоминания ──
+bot.analyze, bot.message_input = fake_analyze, fake_input
+seen = []
+
+
+async def spy_input(m):
+    seen.append(m)
+    return "x", datetime.now(TZ), []
+bot.message_input = spy_input
+m = GroupMsg(9)
+m.text, m.caption = "@Tracker_Bot", None
+asyncio.run(bot.group(m))
+assert "@tracker_bot" in m.replies[0] and not seen  # просто упоминание — подсказка, без запроса к ИИ
+m = GroupMsg(9, voice)
+m.text, m.caption = "@tracker_bot", None
+asyncio.run(bot.group(m))
+assert seen == [voice] and m.reactions  # ответ на голосовое — разбираем его
+m = GroupMsg(9)
+m.text, m.caption = "@tracker_bot завтра в 10 созвон", None
+asyncio.run(bot.group(m))
+assert seen[-1] is m and m.reactions  # текст после упоминания
+bot.analyze, bot.message_input = real_analyze, real_input
+
+# ── Выбор языка кнопкой: сохраняется, подсказка сразу на новом языке ──
+edited, answers = asyncio.run(press(bot.choose_language, "lang:en", 9))
+assert bot.lang_of(9) == "en" and answers == ["✅ Language changed"] and edited.startswith("<b>Hi")
+asyncio.run(press(bot.choose_language, "lang:ky", 9))
+assert bot.lang_of(9) == "ky"
+asyncio.run(press(bot.choose_language, "lang:ru", 9))
 
 # ── Память диалога: последние реплики, только свежие ──
 for i in range(8):
